@@ -1,24 +1,17 @@
 import os
 import csv
 import math
+import numpy as np
+
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-import numpy as np
 from geolib_plus.gef_cpt import GefCpt
+from utils import read_files
 
 # ---------------------------
 # Helpers
 # ---------------------------
-
-
-def read_files(path: str, extension: str = ".gef") -> List[Path]:
-    extension = extension.lower()
-    return [
-        Path(path, f)
-        for f in os.listdir(path)
-        if Path(path, f).is_file() and f.lower().endswith(extension)
-    ]
 
 
 def normalize_coord(val: Optional[float]) -> Tuple[Optional[float], bool]:
@@ -141,17 +134,17 @@ if __name__ == "__main__":
 
     collect_simple_coords(gef_files)
 
-    # rows = collect_fixed_coords(gef_files, check_rd_ranges=True)
-    # save_coords_csv(rows, out_csv)
+    rows = collect_fixed_coords(gef_files, check_rd_ranges=True)
+    save_coords_csv(rows, out_csv)
 
-    # # Quick summary
-    # total = len(rows)
-    # fixed = sum(1 for r in rows if r["was_fixed"])
-    # failed = sum(1 for r in rows if "Failed to read" in r["warning"])
-    # print(f"Done. Wrote {out_csv}")
-    # print(f"Summary: total={total}, fixed={fixed}, failed={failed}")
-    # flagged = [r for r in rows if r["warning"] and "Failed to read" not in r["warning"]]
-    # if flagged:
-    #     print("Range warnings on these rows (first 10 shown):")
-    #     for r in flagged[:10]:
-    #         print(f"  {r['name']}: {r['warning']}")
+    # Quick summary
+    total = len(rows)
+    fixed = sum(1 for r in rows if r["was_fixed"])
+    failed = sum(1 for r in rows if "Failed to read" in r["warning"])
+    print(f"Done. Wrote {out_csv}")
+    print(f"Summary: total={total}, fixed={fixed}, failed={failed}")
+    flagged = [r for r in rows if r["warning"] and "Failed to read" not in r["warning"]]
+    if flagged:
+        print("Range warnings on these rows (first 10 shown):")
+        for r in flagged[:10]:
+            print(f"  {r['name']}: {r['warning']}")

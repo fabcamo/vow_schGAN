@@ -1,11 +1,17 @@
+# Some CPT files have coordinates that are clearly wrong (e.g. 123.456 or 123456789).
+# This script checks all .GEF files in the success and failure folders, and tries to fix
+# them to have a 6-digit integer part (in the Dutch RD coordinate system).
+# If not possible, the coordinates are marked as not correct.
+
 import os
 import csv
 import math
+import numpy as np
+
 from pathlib import Path
 from typing import Optional, Tuple
-
-import numpy as np
 from geolib_plus.gef_cpt import GefCpt
+from utils import read_files
 
 # ---------------------------
 # Configure your folders
@@ -17,11 +23,6 @@ output_csv = Path("cpt_coordinates_status.csv")
 # ---------------------------
 # Helpers
 # ---------------------------
-
-
-def list_gef_files(folder: str) -> list[Path]:
-    p = Path(folder)
-    return [f for f in p.iterdir() if f.is_file() and f.suffix.lower() == ".gef"]
 
 
 def safe_coordinates(
@@ -90,7 +91,7 @@ def fmt_val(val: Optional[float]) -> str:
 
 
 def main():
-    all_files = list_gef_files(success_dir) + list_gef_files(failure_dir)
+    all_files = read_files(success_dir) + read_files(failure_dir)
     rows = []
 
     for f in all_files:
