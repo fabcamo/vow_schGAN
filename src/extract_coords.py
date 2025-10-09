@@ -29,43 +29,37 @@ logging.disable(logging.ERROR)
 logging.getLogger().setLevel(logging.ERROR)
 
 
-def check_file_for_coords(cpt_file: Path):
+def check_file_for_coords(
+    file: Path, cpt_folder: Path, sucess_count: int, fail_count: int
+):
     """
     Check if a GEF file has valid coordinates. If not, move the file to a subfolder "no_coords".
-
     Args:
-        cpt_file (Path): Path to the GEF file.
+        file (Path): Path to the GEF file.
+        cpt_folder (Path): Path to the folder containing GEF files.
+
     Returns:
-        bool: True if coordinates are valid, False otherwise.
+        None
     """
-    all_files = read_files(str(cpt_file), extension=".gef")
-    print(f"Checking {len(all_files)} files for coordinates...")
 
-    sucess_count = 0
-    fail_count = 0
+    try:
+        cpt = GefCpt()
+        cpt.read(str(file))
+        x, y = cpt.coordinates  # tuple (x, y)
 
-    for file in all_files:
-        try:
-            cpt = GefCpt()
-            cpt.read(str(file))
-            x, y = cpt.coordinates  # tuple (x, y)
-
-            if x is None or y is None or np.isnan(x) or np.isnan(y):
-                no_coords_folder = cpt_file / "no_coords"
-                no_coords_folder.mkdir(exist_ok=True)
-                file.rename(no_coords_folder / file.name)
-                fail_count += 1
-            else:
-                sucess_count += 1
-
-        except Exception as e:
-            no_coords_folder = cpt_file / "no_coords"
+        if x is None or y is None or np.isnan(x) or np.isnan(y):
+            no_coords_folder = cpt_folder / "no_coords"
             no_coords_folder.mkdir(exist_ok=True)
             file.rename(no_coords_folder / file.name)
             fail_count += 1
+        else:
+            sucess_count += 1
 
-    print(f"Files with valid coordinates: {sucess_count}")
-    print(f"Files moved to 'no_coords' folder: {fail_count}")
+    except Exception as e:
+        no_coords_folder = cpt_folder / "no_coords"
+        no_coords_folder.mkdir(exist_ok=True)
+        file.rename(no_coords_folder / file.name)
+        fail_count += 1
 
 
 # def extract_coords(gef_folder: Path, output_csv: Path) -> None:
@@ -94,6 +88,27 @@ def check_file_for_coords(cpt_file: Path):
 #     print(f"Coordinates saved to {output_csv}")
 
 
+def process_cpt_coords(cpt_folder: Path, output_csv: Path) -> None:
+    """
+    Process .GEF files in a specified folder to extract and validate coordinates,
+    then save the results to a CSV file.
+    """
+    # 1. Read the .GEF files from the specified folder
+    all_files = read_files(str(cpt_folder), extension=".gef")
+    print(f"Processing {len(all_files)} files for coordinates...")
+
+    sucess_count = 0
+    fail_count = 0
+    # 2. Loop through each file
+    for file in all_files:
+        # 3. Check file by file for coordinates and move those without to "no_coords"
+        check_file_for_coords(file, cpt_folder, sucess_count, fail_count)
+
+    print("Coordinate check completed.")
+    print(f"Total files with valid coordinates: {sucess_count}")
+    print(f"Total files moved to 'no_coords' folder: {fail_count}")
+
+
 if __name__ == "__main__":
 
     ### PATHS AND SETTINGS ########################################################
@@ -104,4 +119,4 @@ if __name__ == "__main__":
     ###########################################################################
 
     # Run the extraction
-    check_file_for_coords(GEF_FOLDER)
+    process_cpt_coords(GEF_FOLDER, OUTPUT_CSV)
