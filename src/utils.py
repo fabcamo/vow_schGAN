@@ -1,4 +1,6 @@
 import sys
+import os
+import math
 from pathlib import Path
 
 # Add your local GEOLib-Plus path
@@ -133,3 +135,7 @@ def save_coords_csv(data, output_file, show_plot=False):
         plt.legend()
         plt.show()
         plt.clf()
+
+
+def euclid(x1: float, y1: float, x2: float, y2: float) -> float:
+    return float(math.hypot(x2 - x1, y2 - y1))
