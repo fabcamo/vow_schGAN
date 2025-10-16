@@ -1,5 +1,6 @@
 import os
 
+# Suppress TensorFlow logging before importing it
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = (
     "2"  # 0=all, 1=filter INFO, 2=+filter WARNING, 3=+filter ERROR
 )
@@ -8,26 +9,25 @@ import re
 import sys
 import numpy as np
 import pandas as pd
-from pathlib import Path
-import matplotlib.pyplot as plt
-from tensorflow.keras.models import load_model
 import logging, warnings
 import tensorflow as tf
-from absl import logging as absl_logging
+import matplotlib.pyplot as plt
 
-tf.get_logger().setLevel(logging.ERROR)  # silence TF python-side INFO/WARNING
+from pathlib import Path
+from tensorflow.keras.models import load_model
+from absl import logging as absl_logging
+from utils import IC_normalization, reverse_IC_normalization
+
+# Silence TF logging
+tf.get_logger().setLevel(logging.ERROR)
 absl_logging.set_verbosity(absl_logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="tensorflow")
 tf.autograph.set_verbosity(0)
 
-
-# Utils
-from utils import IC_normalization, reverse_IC_normalization
-
-# -------------------
+# --------------------------------------------------------------------------------------------
 # CONFIG
-# -------------------
+# --------------------------------------------------------------------------------------------
 SECTIONS_DIR = Path(
     r"C:\VOW\data\schgan_inputs\betuwepand_dike_south"
 )  # where the section CSVs are
@@ -44,26 +44,19 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 SIZE_X = 512
 SIZE_Y = 32
 
-# Real-depth range used during equalization/compression (set these!)
+# Real-depth range used during equalization/compression (set these from previous scripts)
 Y_TOP_M = 6.773  # depth at Depth_Index = 0
 Y_BOTTOM_M = -13.128  # depth at Depth_Index = 31
 
 # Top x-axis appearance: False -> 0..511 px, True -> 0..32 normalized
 TOP_AXIS_0_TO_32 = False
+# -------------------------------------------------------------------------------------------
 
-# Make TF not grab all GPU memory
-try:
-    gpus = tf.config.list_physical_devices("GPU")
-    for g in gpus:
-        tf.config.experimental.set_memory_growth(g, True)
-except Exception:
-    pass
-
-# Reproducible-ish seed
+# Choose either a fixed seed here or random seed
+# seed = 123456  # fixed seed for reproducibility
 seed = np.random.randint(20220412, 20230412)
 np.random.seed(seed)
 tf.random.set_seed(seed)
-
 print(f"[INFO] Using seed: {seed}")
 
 # -------------------
@@ -73,21 +66,28 @@ print("[INFO] Loading model…")
 model = load_model(PATH_TO_MODEL, compile=False)
 
 # Load manifest and coords once
-man = pd.read_csv(MANIFEST_CSV)
+manifest = pd.read_csv(MANIFEST_CSV)
 coords = pd.read_csv(COORDS_WITH_DIST_CSV)
 
 for col in ["section_index", "span_m", "left_pad_m", "right_pad_m", "start_idx"]:
-    if col not in man.columns:
+    if col not in manifest.columns:
         raise ValueError(f"Manifest missing column: {col}")
 if "cum_along_m" not in coords.columns:
     raise ValueError("coords_with_distances.csv must contain 'cum_along_m'")
 
-man["section_index"] = man["section_index"].astype(int)
-man["start_idx"] = man["start_idx"].astype(int)
+manifest["section_index"] = manifest["section_index"].astype(int)
+manifest["start_idx"] = manifest["start_idx"].astype(int)
 
 
 def _parse_section_index(path: Path) -> int:
-    """Extract section index from filename like schemaGAN_section_001.csv"""
+    """
+    Extract section index from filename like schemaGAN_section_001.csv
+
+    Args:
+        path (Path): Path to section CSV file
+    Returns:
+        int: section index
+    """
     m = re.search(r"schemaGAN_section_(\d+)", path.stem)
     if not m:
         raise ValueError(f"Cannot parse section index from {path.name}")
@@ -99,8 +99,13 @@ def _sec_x0_dx(sec_index: int) -> tuple[float, float]:
     Bottom x axis spans meters via:
       x0 = cum_along(first CPT of section) - left_pad_m
       dx = (span + left_pad + right_pad) / (SIZE_X - 1)
+
+    Args:
+        sec_index (int): section index
+    Returns:
+        tuple[float, float]: (x0, dx)
     """
-    r = man.loc[man["section_index"] == sec_index]
+    r = manifest.loc[manifest["section_index"] == sec_index]
     if r.empty:
         raise ValueError(f"No manifest row for section {sec_index}")
     r = r.iloc[0]
@@ -114,10 +119,12 @@ def _sec_x0_dx(sec_index: int) -> tuple[float, float]:
 
 # Y mapping funcs (primary y = Depth_Index, secondary y = meters)
 def idx_to_meters(y_idx: float) -> float:
+    """Convert Depth_Index (0..31) to meters using linear mapping."""
     return Y_TOP_M + (y_idx / (SIZE_Y - 1)) * (Y_BOTTOM_M - Y_TOP_M)
 
 
 def meters_to_idx(y_m: float) -> float:
+    """Convert meters to Depth_Index (0..31) using linear mapping."""
     denom = Y_BOTTOM_M - Y_TOP_M
     return 0.0 if abs(denom) < 1e-12 else (y_m - Y_TOP_M) * (SIZE_Y - 1) / denom
 
@@ -126,7 +133,14 @@ def meters_to_idx(y_m: float) -> float:
 # CORE
 # -------------------
 def run_gan_on_section_csv(csv_path: Path) -> tuple[Path, Path]:
-    """Run SchemaGAN on one section CSV and save CSV + PNG image. Returns (csv_out, png_out)."""
+    """
+    Run SchemaGAN on one section CSV and save CSV + PNG image. Returns (csv_out, png_out).
+
+    Args:
+        csv_path (Path): Path to section CSV file
+    Returns:
+        tuple[Path, Path]: (csv_out, png_out)
+    """
     # Load csv and strip Depth_Index column
     df = pd.read_csv(csv_path)
     if df.shape[0] != SIZE_Y:
@@ -222,7 +236,9 @@ if not section_files:
 
 print(f"[INFO] Found {len(section_files)} section(s) in {SECTIONS_DIR}")
 
+# Create counters for reporting at end
 ok, fail = 0, 0
+# Loop over sections and run GAN
 for i, sec in enumerate(section_files, 1):
     try:
         csv_out, png_out = run_gan_on_section_csv(sec)
