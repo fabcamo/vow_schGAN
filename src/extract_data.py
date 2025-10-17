@@ -21,10 +21,12 @@ from geolib_plus.robertson_cpt_interpretation import (
     InterpretationMethod,
 )
 
-# Disable noisy GeoLib logging
-initial_logging_level = logging.getLogger().getEffectiveLevel()
-logging.disable(logging.ERROR)
-logging.getLogger().setLevel(logging.ERROR)
+# Get logger for this module
+logger = logging.getLogger(__name__)
+
+# Disable noisy GeoLib logging only for GeoLib, not for everything
+geolib_logger = logging.getLogger("geolib_plus")
+geolib_logger.setLevel(logging.ERROR)
 
 
 def process_cpts(gef_list: list[Path]):
@@ -45,7 +47,7 @@ def process_cpts(gef_list: list[Path]):
         try:
             cpt_gef.read(cpt)
         except Exception as e:
-            print(f"Error reading CPT file {cpt}: {e}")
+            logger.warning(f"Error reading CPT file {cpt}: {e}")
             continue
 
         cpt_gef.pre_process_data()
@@ -76,8 +78,8 @@ def process_cpts(gef_list: list[Path]):
         coords.append(
             {"name": cpt_id, "x": cpt_gef.coordinates[0], "y": cpt_gef.coordinates[1]}
         )
-        # Print which file is processed
-        print(f"Processed CPT file: {cpt.name}")
+        # Log which file is processed
+        logger.info(f"Processed CPT file: {cpt.name}")
 
     return data, coords
 
@@ -97,7 +99,7 @@ def save_coords_to_csv(coords: list, output_dir: str):
     df = pd.DataFrame(coords)
     output_file = os.path.join(output_dir, "simple_coords.csv")
     df.to_csv(output_file, index=False)
-    print(f"CPT coordinates saved to: {output_file}")
+    logger.info(f"CPT coordinates saved to: {output_file}")
 
 
 def equalize_top(data_cpts: list[dict]) -> list[dict]:
@@ -115,8 +117,8 @@ def equalize_top(data_cpts: list[dict]) -> list[dict]:
 
     # Find the lowest maximum depth across all CPTs
     lowest_max_depth = min(cpt["depth_max"] for cpt in data_cpts)
-    # Print a message for the depth used for equalization
-    print(f"Equalizing to the lowest maximum depth of {lowest_max_depth} m")
+    # Log a message for the depth used for equalization
+    logger.info(f"Equalizing to the lowest maximum depth of {lowest_max_depth} m")
 
     # Equalize the depth and IC data for each CPT
     for cpt in data_cpts:
@@ -301,7 +303,7 @@ def save_cpt_to_csv(data_cpts: list, output_folder: str, output_name: str):
 
     # Save the DataFrame to CSV
     df.to_csv(output_file, index=False)
-    print(f"Compressed CPT data saved to: {output_file}")
+    logger.info(f"Compressed CPT data saved to: {output_file}")
 
 
 def plot_equalized_depth_cpts(
@@ -482,9 +484,9 @@ if __name__ == "__main__":
     lowest_max_depth = min(cpt["depth_max"] for cpt in data_cpts)
     lowest_min_depth = min(cpt["depth_min"] for cpt in data_cpts)
 
-    # Print the results
-    print(f"The lowest maximum depth is: {lowest_max_depth}")
-    print(f"The lowest minimum depth is: {lowest_min_depth}")
+    # Log the results
+    logger.info(f"The lowest maximum depth is: {lowest_max_depth}")
+    logger.info(f"The lowest minimum depth is: {lowest_min_depth}")
 
     # Equalize depths to match the lowest_max_depth (equalized top)
     equalized_top_cpts = equalize_top(original_data_cpts)

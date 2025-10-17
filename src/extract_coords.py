@@ -18,10 +18,12 @@ import logging
 from geolib_plus.gef_cpt import GefCpt
 from utils import read_files
 
-# Disable noisy GeoLib logging
-initial_logging_level = logging.getLogger().getEffectiveLevel()
-logging.disable(logging.ERROR)
-logging.getLogger().setLevel(logging.ERROR)
+# Get logger for this module
+logger = logging.getLogger(__name__)
+
+# Disable noisy GeoLib logging only for GeoLib, not for everything
+geolib_logger = logging.getLogger("geolib_plus")
+geolib_logger.setLevel(logging.ERROR)
 
 
 # Check if file has coordinates
@@ -146,7 +148,7 @@ def save_coordinates_to_csv(rows, output_csv: Path):
         writer.writerow(["name", "x", "y", "fixed"])
         writer.writerows(rows)
 
-    print(f"Coordinates saved to: {output_csv}")
+    logger.info(f"Coordinates saved to: {output_csv}")
 
 
 # Main process
@@ -215,11 +217,11 @@ def process_cpt_coords(cpt_folder: Path, output_csv: Path) -> None:
     # Step 4: Save all results to CSV
     save_coordinates_to_csv(rows, output_csv)
 
-    # Step 5: Print summary
-    # print("Coordinate check completed.")
-    print(f"Files with valid coordinates: {sucess_count}")
-    print(f"Files moved to 'no_coords':   {fail_count}")
-    print(f"Files written to CSV:         {len(rows)}")
+    # Step 5: Log summary
+    logger.info("Coordinate check completed.")
+    logger.info(f"Files with valid coordinates: {sucess_count}")
+    logger.info(f"Files moved to 'no_coords':   {fail_count}")
+    logger.info(f"Files written to CSV:         {len(rows)}")
 
 
 # --------------------------------------------------------------------------

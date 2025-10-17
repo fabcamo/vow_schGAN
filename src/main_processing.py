@@ -17,33 +17,14 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-# --- FIX: some imported modules globally disable logging; undo that here
-logging.disable(logging.NOTSET)
-
-
 # Configure logging
 LOG_LEVEL = logging.INFO  # Set to logging.DEBUG for more detail
 VERBOSE = (
     True  # Default True to show verbose internal progress (set False to reduce output)
 )
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    force=True,
-)
-logger = logging.getLogger(__name__)
 
-# Optional file logging
-try:
-    LOG_FILE = Path("pipeline.log")
-    file_handler = logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    )
-    logger.addHandler(file_handler)
-    logger.info(f"Logging to file: {LOG_FILE.resolve()}")
-except Exception as _e:
-    logger.warning(f"Could not set up file logging: {_e}")
+# Logger will be configured in main() after experiment folder is created
+logger = None
 
 
 def trace(message: str, level: int = logging.INFO):
@@ -63,12 +44,12 @@ from utils import setup_experiment
 
 # Base configuration
 RES_DIR = Path(r"C:\VOW\res")
-REGION = "north"
+REGION = "south"
 EXP_NAME = "exp_1"
 DESCRIPTION = "Baseline with 6 CPTs and 2 overlapping"
 
 # Input data paths
-CPT_FOLDER = Path(r"C:\VOW\data\cpts\betuwepand\dike_north_BRO")
+CPT_FOLDER = Path(r"C:\VOW\data\cpts\betuwepand\dike_south_BRO")
 SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")
 
 # Processing parameters
@@ -637,6 +618,41 @@ def run_mosaic_creation(
 def main():
     """Execute the complete VOW SchemaGAN pipeline."""
 
+    global logger
+
+    # First, create the experiment folder structure
+    folders = setup_experiment(
+        base_dir=RES_DIR, region=REGION, exp_name=EXP_NAME, description=DESCRIPTION
+    )
+
+    # Now configure logging to save in the experiment folder
+    logging.basicConfig(
+        level=LOG_LEVEL,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        force=True,
+    )
+    logger = logging.getLogger(__name__)
+
+    # Set up file logging in the experiment folder
+    try:
+        LOG_FILE = folders["root"] / "pipeline.log"
+        file_handler = logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        logger.addHandler(file_handler)
+
+        # Also add console handler to ensure we see output
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        logger.addHandler(console_handler)
+
+        logger.info(f"Logging to file: {LOG_FILE.resolve()}")
+    except Exception as _e:
+        print(f"Warning: Could not set up file logging: {_e}")
+
     logger.info("=" * 60)
     logger.info("Starting VOW SchemaGAN Pipeline")
     logger.info("=" * 60)
@@ -651,10 +667,6 @@ def main():
     # 1. CREATE EXPERIMENT FOLDER STRUCTURE
     # =============================================================================
     logger.info("Step 1: Creating experiment folder structure...")
-
-    folders = setup_experiment(
-        base_dir=RES_DIR, region=REGION, exp_name=EXP_NAME, description=DESCRIPTION
-    )
     logger.info(f"Experiment folders created at: {folders['root']}")
 
     # =============================================================================
@@ -766,12 +778,9 @@ def main():
             logger.error(f"[DEBUG] Traceback: {traceback.format_exc()}")
             return
 
-        # =============================================================================
-        # 6. CREATE MOSAIC FROM GENERATED SCHEMAS
-        # =============================================================================
-    """Execute the complete VOW SchemaGAN pipeline."""
-    logging.disable(logging.NOTSET)  # <-- ADD THIS
-
+    # =============================================================================
+    # 6. CREATE MOSAIC FROM GENERATED SCHEMAS
+    # =============================================================================
     logger.info("=" * 60)
     logger.info("Step 6: Creating mosaic from generated schemas...")
     logger.info("[DEBUG] About to call run_mosaic_creation function...")

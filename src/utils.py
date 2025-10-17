@@ -256,5 +256,6 @@ def setup_experiment(
             f.write("Description:\n")
             f.write(description.strip() + "\n")
 
-    print(f"[INFO] Created folder structure for {region}/{exp_name}")
+    # Use print here since logger might not be configured yet
+    # The main script will log the completion
     return {"root": exp_root, **paths}

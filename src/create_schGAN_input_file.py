@@ -17,10 +17,14 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 import numpy as np
 import pandas as pd
+import logging
 
 from utils import (
     euclid,
 )  # def euclid(x1: float, y1: float, x2: float, y2: float) -> float
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 
 # -----------------------------
@@ -382,17 +386,19 @@ def process_sections(
     """
     ensure_outdir(out_dir)
 
-    # (1) Sort + distances table (clear printout helps validate spacing)
+    # (1) Sort + distances table (clear logging helps validate spacing)
     coords_sorted = sort_cpt_by_coordinates(coords_df, from_where, to_where)
     coords_dist = compute_distances(coords_sorted)
-    print("Distances between CPTs (m):")
-    print(coords_dist[["name", "dist_from_first_m", "dist_from_prev_m", "cum_along_m"]])
+    logger.info("Distances between CPTs (m):")
+    logger.info(
+        f"\n{coords_dist[['name', 'dist_from_first_m', 'dist_from_prev_m', 'cum_along_m']].to_string()}"
+    )
 
     # (2) Mark names that exist in CPT data (warn about missing ones)
     coords_marked, unmatched = match_names(coords_dist, cpt_df)
     if unmatched:
-        print(
-            f"[WARN] {len(unmatched)} coordinate names have no matching CPT-data columns and will be skipped."
+        logger.warning(
+            f"{len(unmatched)} coordinate names have no matching CPT-data columns and will be skipped."
         )
 
     # (3) Section starts (sliding window)
@@ -510,9 +516,9 @@ if __name__ == "__main__":
 
     write_manifest(manifest, OUT_DIR)
 
-    print(f"Written {len(manifest)} sections to: {OUT_DIR.resolve()}")
+    logger.info(f"Written {len(manifest)} sections to: {OUT_DIR.resolve()}")
     if any(m["skipped_count"] for m in manifest):
-        print(
+        logger.info(
             "[NOTE] Some CPT names in coords had no matching data columns and were left as zero columns. "
             "Consider aligning names or adding a mapping step."
         )
