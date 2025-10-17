@@ -1,21 +1,15 @@
 from pathlib import Path
-from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
 # =============================================================================
-# CONFIG – Update these paths
+# CONFIG
 # =============================================================================
-MANIFEST_CSV = Path(
-    r"C:\VOW\data\schgan_inputs\betuwepand_dike_north\manifest_sections.csv"
-)
-COORDS_WITH_DIST_CSV = Path(
-    r"C:\VOW\data\schgan_inputs\betuwepand_dike_north\coords_with_distances.csv"
-)
-GAN_DIR = Path(r"C:\VOW\res\betuwepand\dike_south")  # where the *_gan.csv files are
-OUT_DIR = Path(r"C:\VOW\res\betuwepand\dike_south")  # where to save mosaic csv/png
+MANIFEST_CSV = Path(r"C:\VOW\data\test_outputs\manifest_sections.csv")
+COORDS_WITH_DIST_CSV = Path(r"C:\VOW\data\test_outputs\cpt_coords_with_distances.csv")
+GAN_DIR = Path(r"C:\VOW\res\testtest")  # where the *_gan.csv files are
+OUT_DIR = Path(r"C:\VOW\res\testtest")  # where to save mosaic csv/png
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Section & image constants
@@ -34,7 +28,7 @@ TOP_AXIS_0_TO_32 = False
 
 
 # =============================================================================
-# DATA DEFINITIONS
+# REQUIRED COLUMNS
 # =============================================================================
 REQUIRED_MANIFEST_COLS = {
     "section_index",
@@ -45,15 +39,6 @@ REQUIRED_MANIFEST_COLS = {
     "csv_path",
 }
 REQUIRED_COORDS_COLS = {"cum_along_m"}
-
-
-@dataclass
-class SectionPlacement:
-    """Defines how a section maps its 512 columns to real-world coordinates."""
-
-    x0: float  # leftmost coordinate in meters (start of section)
-    dx: float  # meters per pixel for this section
-    x1: float  # rightmost coordinate in meters (end of section)
 
 
 # =============================================================================
@@ -78,20 +63,28 @@ def load_inputs(manifest_csv: Path, coords_csv: Path):
 
 def find_latest_gan_csv(section_index: int):
     """Find the newest *_gan.csv file for a given section index."""
-    candidates = list(GAN_DIR.glob(f"schemaGAN_section_{section_index:03d}_*_gan.csv"))
+    # Look for files like: section_01_cpts_*_gan.csv
+    pattern = f"section_{section_index:02d}_cpts_*_gan.csv"
+    candidates = list(GAN_DIR.glob(pattern))
     if not candidates:
         return None
+    # Sort by modification time (newest first)
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
 
 
 # =============================================================================
-# COMPUTE SECTION PLACEMENTS
+# COMPUTE SECTION PLACEMENTS (NO CLASSES)
 # =============================================================================
 def compute_section_placement(row, coords):
     """
     Calculate the real-world x-range for this section.
     Includes left/right padding and converts pixel index → meters.
+
+    Returns a tuple: (x0, dx, x1)
+      x0: leftmost coordinate (meters) including left padding
+      dx: meters per pixel in this section
+      x1: rightmost coordinate (meters)
     """
     total_span = float(row["span_m"] + row["left_pad_m"] + row["right_pad_m"])
     if total_span <= 0:
@@ -102,7 +95,7 @@ def compute_section_placement(row, coords):
     x0 = m0 - float(row["left_pad_m"])  # shift to include left padding
     dx = total_span / (N_COLS - 1)  # meters per pixel in section
     x1 = x0 + (N_COLS - 1) * dx
-    return SectionPlacement(x0, dx, x1)
+    return x0, dx, x1
 
 
 def choose_global_grid(manifest):
@@ -134,7 +127,7 @@ def add_section_to_accumulator(acc, wts, section_csv, x0, dx, xmin, global_dx):
     arr = pd.read_csv(section_csv).to_numpy(dtype=float)
     if arr.shape != (N_ROWS, N_COLS):
         raise ValueError(
-            f"{section_csv.name}: expected shape (32,512), got {arr.shape}"
+            f"{Path(section_csv).name}: expected shape (32,512), got {arr.shape}"
         )
 
     # Compute global positions
@@ -180,13 +173,18 @@ def build_mosaic(manifest, coords):
     if manifest.empty:
         raise RuntimeError("No sections with GAN CSVs found.")
 
-    # Compute placement for each section
-    placements = [
-        compute_section_placement(row, coords) for _, row in manifest.iterrows()
-    ]
-    manifest["x0"] = [p.x0 for p in placements]
-    manifest["dx"] = [p.dx for p in placements]
-    manifest["x1"] = [p.x1 for p in placements]
+    # Compute placement for each section (as tuples)
+    x0_list, dx_list, x1_list = [], [], []
+    for _, row in manifest.iterrows():
+        x0, dx, x1 = compute_section_placement(row, coords)
+        x0_list.append(x0)
+        dx_list.append(dx)
+        x1_list.append(x1)
+
+    # Attach placement columns
+    manifest["x0"] = x0_list
+    manifest["dx"] = dx_list
+    manifest["x1"] = x1_list
 
     # Define global grid
     xmin, xmax, global_dx, width = choose_global_grid(manifest)
@@ -204,7 +202,7 @@ def build_mosaic(manifest, coords):
         add_section_to_accumulator(
             acc,
             wts,
-            Path(row["gan_csv"]),
+            row["gan_csv"],
             float(row["x0"]),
             float(row["dx"]),
             xmin,
@@ -214,7 +212,7 @@ def build_mosaic(manifest, coords):
     # Weighted average
     eps = 1e-12
     mosaic = acc / np.maximum(wts, eps)[None, :]
-    return mosaic, xmin, xmax, global_dx, width
+    return mosaic, xmin, xmax, global_dx
 
 
 # =============================================================================
@@ -287,7 +285,7 @@ def plot_mosaic(mosaic, xmin, xmax, global_dx, out_png):
 # =============================================================================
 def main():
     manifest, coords = load_inputs(MANIFEST_CSV, COORDS_WITH_DIST_CSV)
-    mosaic, xmin, xmax, global_dx, _ = build_mosaic(manifest, coords)
+    mosaic, xmin, xmax, global_dx = build_mosaic(manifest, coords)
 
     # Save CSV
     mosaic_csv = OUT_DIR / "schemaGAN_mosaic.csv"

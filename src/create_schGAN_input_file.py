@@ -472,9 +472,9 @@ def process_sections(
 # -----------------------------
 if __name__ == "__main__":
     # ----- CONFIG -----
-    COORDS_CSV = Path(r"C:\VOW\gis\coords\betuwepand_dike_south.csv")
+    COORDS_CSV = Path(r"C:\VOW\gis\coords\betuwepand_dike_north.csv")
     CPT_DATA_CSV = Path(
-        r"C:\VOW\data\schgan_inputs\testtestest\test_dike_south_input_new.csv"
+        r"C:\VOW\data\schgan_inputs\testtestest\test_dike_north_input_new.csv"
     )
     OUT_DIR = Path(r"C:\VOW\data\test_outputs")
 

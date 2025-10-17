@@ -28,15 +28,11 @@ tf.autograph.set_verbosity(0)
 # --------------------------------------------------------------------------------------------
 # CONFIG
 # --------------------------------------------------------------------------------------------
-SECTIONS_DIR = Path(
-    r"C:\VOW\data\schgan_inputs\betuwepand_dike_south"
-)  # where the section CSVs are
+SECTIONS_DIR = Path(r"C:\VOW\data\test_outputs")  # where the section CSVs are
 PATH_TO_MODEL = Path(r"D:\schemaGAN\h5\schemaGAN.h5")  # generator .h5
-MANIFEST_CSV = Path(
-    r"C:\VOW\data\schgan_inputs\betuwepand_dike_south\manifest_sections.csv"
-)
+MANIFEST_CSV = Path(r"C:\VOW\data\test_outputs\manifest_sections.csv")
 COORDS_WITH_DIST_CSV = Path(
-    r"C:\VOW\data\schgan_inputs\betuwepand_dike_south\coords_with_distances.csv"
+    r"C:\VOW\data\schgan_inputs\betuwepand_dike_north\coords_with_distances.csv"
 )
 OUT_DIR = Path(r"C:\VOW\res\testtest")  # where to save outputs
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -81,14 +77,12 @@ manifest["start_idx"] = manifest["start_idx"].astype(int)
 
 def _parse_section_index(path: Path) -> int:
     """
-    Extract section index from filename like schemaGAN_section_001.csv
-
-    Args:
-        path (Path): Path to section CSV file
-    Returns:
-        int: section index
+    Extract section index from filenames like:
+      - section_XX_cpts_YYY_to_WWW.csv
+      - schemaGAN_section_XXX.csv   (backward compatible)
     """
-    m = re.search(r"schemaGAN_section_(\d+)", path.stem)
+    s = path.stem
+    m = re.search(r"(?:^|_)section_(\d+)(?:_|$)", s)  # matches both patterns
     if not m:
         raise ValueError(f"Cannot parse section index from {path.name}")
     return int(m.group(1))
@@ -230,11 +224,15 @@ def run_gan_on_section_csv(csv_path: Path) -> tuple[Path, Path]:
 # -------------------
 # MAIN LOOP
 # -------------------
-section_files = sorted(SECTIONS_DIR.glob("schemaGAN_section_*.csv"))
+# -------------------
+# MAIN LOOP
+# -------------------
+section_files = sorted(SECTIONS_DIR.glob("section_*_cpts_*.csv"))
 if not section_files:
     raise FileNotFoundError(f"No section CSVs found in {SECTIONS_DIR}")
 
 print(f"[INFO] Found {len(section_files)} section(s) in {SECTIONS_DIR}")
+
 
 # Create counters for reporting at end
 ok, fail = 0, 0
