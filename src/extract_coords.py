@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.append(r"D:\GEOLib-Plus")
 
 import csv
+import re
 import numpy as np
 import logging
 from geolib_plus.gef_cpt import GefCpt
@@ -204,8 +205,12 @@ def process_cpt_coords(cpt_folder: Path, output_csv: Path) -> None:
         # Step 2: Fix broken coordinates
         x_fixed, y_fixed, was_fixed = fix_broken_coords(cpt)
 
-        # Step 3: Add to CSV rows
-        rows.append([file.stem, x_fixed, y_fixed, "TRUE" if was_fixed else "FALSE"])
+        # Step 3: Clean CPT name and add to CSV rows
+        match = re.search(r"CPT\d+", file.stem.upper())
+        cpt_name = (
+            match.group(0) if match else file.stem
+        )  # fallback if pattern not found
+        rows.append([cpt_name, x_fixed, y_fixed, "TRUE" if was_fixed else "FALSE"])
 
     # Step 4: Save all results to CSV
     save_coordinates_to_csv(rows, output_csv)
