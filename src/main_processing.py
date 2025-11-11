@@ -45,7 +45,7 @@ from utils import setup_experiment
 # Base configuration
 RES_DIR = Path(r"C:\VOW\res")
 REGION = "south"
-EXP_NAME = "exp_1"
+EXP_NAME = "exp_2"
 DESCRIPTION = "Baseline with 6 CPTs and 2 overlapping"
 
 # Input data paths
@@ -223,7 +223,7 @@ def run_schema_generation(
     coords_df = pd.read_csv(coords_csv)
 
     # Constants
-    SIZE_X, SIZE_Y = 512, 32
+    SIZE_X, SIZE_Y = N_COLS, N_ROWS
 
     success_count = 0
     fail_count = 0
@@ -351,7 +351,7 @@ def run_mosaic_creation(
     y_top_m: float,
     y_bottom_m: float,
 ):
-    """Create mosaic from generated schemas - reimplemented to avoid import issues."""
+    """Create mosaic from generated schemas."""
 
     # Ensure output directory exists
     mosaic_folder.mkdir(parents=True, exist_ok=True)
@@ -396,8 +396,8 @@ def run_mosaic_creation(
     import matplotlib.pyplot as plt
     import re
 
-    N_COLS = 512
-    N_ROWS = 32
+    N_COLS = N_COLS
+    N_ROWS = N_ROWS
     GLOBAL_DX = None
     TOP_AXIS_0_TO_32 = False
 
@@ -453,10 +453,10 @@ def run_mosaic_creation(
         arr = pd.read_csv(section_csv).to_numpy(dtype=float)
         if arr.shape != (N_ROWS, N_COLS):
             logger.error(
-                f"[ERROR] {section_csv.name}: expected shape (32,512), got {arr.shape}"
+                f"[ERROR] {section_csv.name}: expected shape ({N_ROWS},{N_COLS}), got {arr.shape}"
             )
             raise ValueError(
-                f"{section_csv.name}: expected shape (32,512), got {arr.shape}"
+                f"{section_csv.name}: expected shape ({N_ROWS},{N_COLS}), got {arr.shape}"
             )
 
         xj = x0 + np.arange(N_COLS) * dx
