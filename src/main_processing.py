@@ -29,11 +29,11 @@ logger = None
 
 def trace(message: str, level: int = logging.INFO):
     """Emit a verbose message if VERBOSE mode is enabled.
-    
+
     Args:
         message: The log message to emit.
         level: Logging level (default: logging.INFO). Can be INFO, DEBUG, WARNING, ERROR.
-        
+
     Note:
         Messages are only emitted when the global VERBOSE flag is True.
     """
@@ -53,7 +53,7 @@ from utils import setup_experiment
 # Base configuration
 RES_DIR = Path(r"C:\VOW\res")
 REGION = "south"
-EXP_NAME = "exp_2"
+EXP_NAME = "exp_3"
 DESCRIPTION = "Baseline with 6 CPTs and 2 overlapping"
 
 # Input data paths
@@ -62,8 +62,17 @@ SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")
 
 # Processing parameters
 COMPRESSION_METHOD = "mean"  # "mean" or "max" for IC value compression
-N_COLS = 512  # Number of columns in output sections
-N_ROWS = 32  # Number of rows (depth levels) in output sections
+
+# CPT Data Compression - can be different from model input size
+CPT_DEPTH_PIXELS = 128  # Number of depth levels to compress raw CPT data to
+# Can be 32, 64, 128, etc. independent of N_ROWS
+# Higher values preserve more detail from raw CPT data
+
+# Model Input Dimensions - MUST match what SchemaGAN expects
+N_COLS = 512  # Number of columns in sections (SchemaGAN expects 512)
+N_ROWS = 32  # Number of rows in sections (SchemaGAN expects 32)
+# If CPT_DEPTH_PIXELS != N_ROWS, resampling will occur in section creation
+
 CPTS_PER_SECTION = 6  # Number of CPTs per section
 OVERLAP_CPTS = 2  # Number of overlapping CPTs between sections
 LEFT_PAD_FRACTION = 0.10  # Left padding as fraction of section span
@@ -79,18 +88,18 @@ Y_BOTTOM_M: Optional[float] = None
 
 def run_coordinate_extraction(cpt_folder: Path, coords_csv: Path):
     """Extract and validate CPT coordinates from GEF files.
-    
+
     This function processes all .gef files in the specified folder, validates their
     coordinates, and exports them to a CSV file. Invalid files are moved to a 'no_coords'
     subfolder.
-    
+
     Args:
         cpt_folder: Path to folder containing .gef CPT files.
         coords_csv: Output path for the coordinates CSV file.
-        
+
     Raises:
         FileNotFoundError: If the CPT folder does not exist.
-        
+
     Note:
         Coordinates are validated for Netherlands RD system (6-digit format).
         Auto-corrects common scaling errors (e.g., 123.456 → 123456.000).
@@ -106,36 +115,44 @@ def run_coordinate_extraction(cpt_folder: Path, coords_csv: Path):
 
 
 def run_cpt_data_processing(
-    cpt_folder: Path, output_folder: Path, compression_method: str = "mean"
+    cpt_folder: Path,
+    output_folder: Path,
+    compression_method: str = "mean",
+    cpt_depth_pixels: int = 32,
 ):
-    """Process, interpret, and compress CPT data to 32-pixel depth profiles.
-    
+    """Process, interpret, and compress CPT data to specified depth resolution.
+
     This function reads GEF files, performs Robertson CPT interpretation to calculate
     soil behavior index (IC), equalizes depth ranges across all CPTs, and compresses
-    the data to a standardized 32-row format suitable for SchemaGAN input.
-    
+    the data to a standardized format. The compressed data can later be resampled
+    to match the model's expected input size if needed.
+
     Args:
         cpt_folder: Path to folder containing .gef CPT files.
         output_folder: Path where compressed CPT data will be saved.
         compression_method: Method for aggregating IC values ("mean" or "max").
             - "mean": Average IC value in each depth bin (smoother profiles)
             - "max": Maximum IC value in each depth bin (preserves extremes)
-            
+        cpt_depth_pixels: Number of depth levels (pixels) to compress CPT data to.
+            This is independent of the model's expected input size (N_ROWS).
+            For example, compress to 64 pixels, then later resample to 32 for the model.
+
     Returns:
         tuple: (output_path, lowest_max_depth, lowest_min_depth)
             - output_path: Path to saved compressed CSV file
             - lowest_max_depth: Shallowest starting depth across all CPTs (meters)
             - lowest_min_depth: Deepest ending depth across all CPTs (meters)
-            
+
     Note:
-        Output CSV has columns: Depth_Index (0-31), CPT1, CPT2, ...
+        Output CSV has columns: Depth_Index (0 to cpt_depth_pixels-1), CPT1, CPT2, ...
         Each CPT column contains IC values at corresponding depth levels.
+        The compression size (cpt_depth_pixels) does NOT need to match N_ROWS.
     """
     from extract_data import (
         process_cpts,
         equalize_top,
         equalize_depth,
-        compress_to_32px,
+        compress_cpt_data,
         save_cpt_to_csv,
     )
     from utils import read_files
@@ -157,10 +174,14 @@ def run_cpt_data_processing(
     # Process data
     equalized_top_cpts = equalize_top(original_data_cpts)
     equalized_depth_cpts = equalize_depth(equalized_top_cpts, lowest_min_depth)
-    compressed_cpts = compress_to_32px(equalized_depth_cpts, method=compression_method)
+    compressed_cpts = compress_cpt_data(
+        equalized_depth_cpts, method=compression_method, n_pixels=cpt_depth_pixels
+    )
 
     # Save results
-    output_filename = f"compressed_cpt_data_{compression_method}.csv"
+    output_filename = (
+        f"compressed_cpt_data_{compression_method}_{cpt_depth_pixels}px.csv"
+    )
     save_cpt_to_csv(compressed_cpts, str(output_folder), output_filename)
 
     output_path = output_folder / output_filename
@@ -184,11 +205,11 @@ def run_section_creation(
     dir_to: str,
 ):
     """Create spatial sections with overlapping CPTs for SchemaGAN input.
-    
+
     This function sorts CPTs spatially, divides them into overlapping sections,
-    and generates input matrices (n_rows × n_cols) where CPT data is positioned
+    and generates input matrices (n_rows x n_cols) where CPT data is positioned
     at correct spatial locations with padding. Areas without data are filled with zeros.
-    
+
     Args:
         coords_csv: Path to CSV file with CPT coordinates (columns: name, x, y).
         cpt_csv: Path to compressed CPT data CSV (columns: Depth_Index, CPT names...).
@@ -201,7 +222,7 @@ def run_section_creation(
         right_pad: Right padding as fraction of section span (e.g., 0.10 = 10%).
         dir_from: Starting direction ("west", "east", "north", or "south").
         dir_to: Ending direction ("west", "east", "north", or "south").
-        
+
     Returns:
         list: Manifest list of dictionaries, each containing section metadata:
             - section_index: Section number
@@ -209,7 +230,7 @@ def run_section_creation(
             - span_m: Real-world distance between first and last CPT
             - left_pad_m, right_pad_m: Padding distances in meters
             - csv_path: Path to section CSV file
-            
+
     """
     from create_schGAN_input_file import (
         process_sections,
@@ -254,23 +275,23 @@ def run_schema_generation(
     y_bottom_m: float,
 ):
     """Generate detailed subsurface schemas using trained SchemaGAN model.
-    
+
     This function loads section CSV files (sparse IC data with zeros), feeds them
     through the trained SchemaGAN generator network, and produces detailed subsurface
     schemas as both CSV data and PNG visualizations with proper coordinate axes.
-    
+
     Args:
         sections_folder: Path to folder containing section CSV files and manifest.
         gan_images_folder: Output folder for generated schema images and data.
         model_path: Path to trained SchemaGAN model file (.h5).
         y_top_m: Top depth in meters (e.g., 6.8 for 6.8m below surface).
         y_bottom_m: Bottom depth in meters (e.g., -13.1 for 13.1m below surface).
-        
+
     Returns:
         tuple: (success_count, fail_count)
             - success_count: Number of sections successfully processed
             - fail_count: Number of sections that failed processing
-            
+
     Note:
         For each section, generates:
         - CSV file: Raw schema data (N_ROWS × N_COLS matrix of IC values)
@@ -451,27 +472,27 @@ def run_mosaic_creation(
     y_bottom_m: float,
 ):
     """Combine all generated schema sections into a seamless mosaic.
-    
+
     This function assembles individual schema sections into a complete subsurface
     visualization by interpolating overlapping regions and aligning them on a
     global coordinate grid. Produces both a CSV data file and PNG visualization.
-    
+
     Args:
         sections_folder: Path to folder containing section manifest and coordinates.
         gan_images_folder: Path to folder with generated schema CSV files (*_gan.csv).
         mosaic_folder: Output folder for mosaic files.
         y_top_m: Top depth in meters for visualization axis.
         y_bottom_m: Bottom depth in meters for visualization axis.
-        
+
     Raises:
         RuntimeError: If no valid GAN CSV files are found.
-        
+
     Note:
         The mosaic uses bilinear interpolation to blend overlapping sections smoothly.
         Output files:
         - schemaGAN_mosaic.csv: Complete mosaic data matrix
         - schemaGAN_mosaic.png: Visualization with distance and depth axes
-        
+
         The global grid resolution (dx) is computed as the median pixel size
         across all sections to maintain consistent spatial scale.
     """
@@ -533,10 +554,10 @@ def run_mosaic_creation(
 
     def find_latest_gan_csv(section_index):
         """Find the most recent GAN CSV file for a given section.
-        
+
         Args:
             section_index: Section number to search for.
-            
+
         Returns:
             Path or None: Path to matching GAN CSV file, or None if not found.
         """
@@ -559,11 +580,11 @@ def run_mosaic_creation(
 
     def compute_section_placement(row, coords):
         """Calculate real-world coordinates and pixel resolution for a section.
-        
+
         Args:
             row: Manifest row (pandas Series) containing section metadata.
             coords: DataFrame with CPT coordinates and cumulative distances.
-            
+
         Returns:
             tuple: (x0, dx, x1)
                 - x0: Leftmost coordinate in meters (including left padding)
@@ -583,10 +604,10 @@ def run_mosaic_creation(
 
     def choose_global_grid(manifest):
         """Determine global mosaic grid parameters from all sections.
-        
+
         Args:
             manifest: DataFrame with section placement data (columns: x0, x1, dx).
-            
+
         Returns:
             tuple: (xmin, xmax, dx, width)
                 - xmin: Leftmost coordinate across all sections
@@ -605,10 +626,10 @@ def run_mosaic_creation(
 
     def add_section_to_accumulator(acc, wts, section_csv, x0, dx, xmin, global_dx):
         """Add a section to the mosaic accumulator using bilinear interpolation.
-        
+
         Maps section pixels to global grid coordinates and accumulates weighted
         values to handle overlapping sections smoothly.
-        
+
         Args:
             acc: Accumulator array (N_ROWS x width) for summing weighted values.
             wts: Weights array (width,) for tracking contribution per column.
@@ -617,7 +638,7 @@ def run_mosaic_creation(
             dx: Section's pixel size (meters per pixel).
             xmin: Global grid's leftmost coordinate.
             global_dx: Global grid's pixel size.
-            
+
         Note:
             Uses bilinear interpolation: each section pixel contributes to
             two adjacent global grid columns based on fractional position.
@@ -660,18 +681,18 @@ def run_mosaic_creation(
 
     def build_mosaic(manifest, coords):
         """Assemble all sections into a complete mosaic.
-        
+
         Args:
             manifest: DataFrame with section metadata.
             coords: DataFrame with CPT coordinates and distances.
-            
+
         Returns:
             tuple: (mosaic, xmin, xmax, global_dx)
                 - mosaic: Assembled mosaic array (N_ROWS × width)
                 - xmin: Leftmost coordinate
                 - xmax: Rightmost coordinate
                 - global_dx: Pixel size used in mosaic
-                
+
         Raises:
             RuntimeError: If no sections with GAN CSVs are found.
         """
@@ -746,14 +767,14 @@ def run_mosaic_creation(
 
     def plot_mosaic(mosaic, xmin, xmax, global_dx, out_png):
         """Create and save mosaic visualization with coordinate axes.
-        
+
         Args:
             mosaic: Mosaic data array (N_ROWS x width).
             xmin: Leftmost coordinate in meters.
             xmax: Rightmost coordinate in meters.
             global_dx: Pixel size in meters per pixel.
             out_png: Output path for PNG file.
-            
+
         Note:
             Creates visualization with 4 axes:
             - Bottom: Distance along line (meters)
@@ -822,7 +843,7 @@ def run_mosaic_creation(
 
 def main():
     """Execute the complete VOW SchemaGAN pipeline.
-    
+
     Orchestrates all six steps of the workflow:
     1. Creates experiment folder structure
     2. Extracts and validates CPT coordinates from GEF files
@@ -830,17 +851,17 @@ def main():
     4. Creates spatial sections with overlapping CPTs
     5. Generates detailed schemas using SchemaGAN model
     6. Assembles all sections into a seamless mosaic
-    
+
     All configuration is taken from module-level CONFIG constants.
     Results are saved in: {RES_DIR}/{REGION}/{EXP_NAME}/
-    
+
     Logging:
         - Console: All INFO and higher messages
         - File: Complete log saved to {experiment_folder}/pipeline.log
-        
+
     Returns:
         None. Exits early if any critical step fails.
-        
+
     Note:
         Depth range (y_top_m, y_bottom_m) is auto-computed from CPT data
         if not explicitly set in CONFIG section.
@@ -914,7 +935,10 @@ def main():
 
     try:
         compressed_csv, y_top, y_bottom = run_cpt_data_processing(
-            CPT_FOLDER, folders["2_compressed_cpt"], COMPRESSION_METHOD
+            CPT_FOLDER,
+            folders["2_compressed_cpt"],
+            COMPRESSION_METHOD,
+            CPT_DEPTH_PIXELS,
         )
 
         # Store depth range for later steps (use computed values if not set)

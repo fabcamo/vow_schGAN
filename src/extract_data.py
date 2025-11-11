@@ -204,17 +204,18 @@ def equalize_depth(data_cpts, lowest_min_depth):
     return equalized_depth_cpts
 
 
-def compress_to_32px(equalized_cpts, method="mean"):
+def compress_cpt_data(equalized_cpts, method="mean", n_pixels=32):
     """
-    Compress CPT data to 32 pixels by dividing the depth into 32 equal groups
-    and aggregating IC values for each group.
+    Compress CPT data to specified number of depth pixels by dividing the depth
+    into equal groups and aggregating IC values for each group.
 
-    Params:
+    Args:
         equalized_cpts (list): List of dictionaries containing equalized CPT data.
-        method (str): Aggregation method, either "mean" or "max".
+        method (str): Aggregation method, either "mean" or "max". Default is "mean".
+        n_pixels (int): Number of depth levels to compress to. Default is 32.
 
     Returns:
-        list: List of dictionaries with compressed CPT data (32 depth and IC values).
+        list: List of dictionaries with compressed CPT data (n_pixels depth and IC values).
     """
     if method not in ["mean", "max"]:
         raise ValueError("Invalid method. Use 'mean' or 'max'.")
@@ -233,18 +234,22 @@ def compress_to_32px(equalized_cpts, method="mean"):
         depth = depth[sort_indices]
         IC = IC[sort_indices]
 
-        # Define 32 equal depth intervals
-        depth_bins = np.linspace(0, 31, 33)  # 33 edges for 32 bins
+        # Define n_pixels equal depth intervals (e.g., 32, 64, 128)
+        depth_bins = np.linspace(
+            0, n_pixels - 1, n_pixels + 1
+        )  # n_pixels+1 edges for n_pixels bins
 
         # Aggregate IC values within each depth interval
         IC_compressed = []
         depth_compressed = []
         for i in range(len(depth_bins) - 1):
-            # Find indices of original depths that map into the current bin range (scaled to 0-31)
+            # Find indices of original depths that map into the current bin range (scaled to 0..n_pixels-1)
             depth_min = depth[0]
             depth_max = depth[-1]
-            scaled_bins_min = depth_min + (depth_bins[i] / 31) * (depth_max - depth_min)
-            scaled_bins_max = depth_min + (depth_bins[i + 1] / 31) * (
+            scaled_bins_min = depth_min + (depth_bins[i] / (n_pixels - 1)) * (
+                depth_max - depth_min
+            )
+            scaled_bins_max = depth_min + (depth_bins[i + 1] / (n_pixels - 1)) * (
                 depth_max - depth_min
             )
 
@@ -270,12 +275,12 @@ def compress_to_32px(equalized_cpts, method="mean"):
 
 def save_cpt_to_csv(data_cpts: list, output_folder: str, output_name: str):
     """
-    Save the compressed CPT data (32 pixels) to a CSV file.
+    Save the compressed CPT data to a CSV file.
 
-    The CSV will have 33 rows: one for depth indices (0 to 31) and 32 depth bins,
+    The CSV will have n_pixels+1 rows: one for depth indices and n_pixels depth bins,
     and one for each CPT with IC values.
 
-    Params:
+    Args:
         data_cpts (list): List of dictionaries containing compressed CPT data.
         output_folder (str): Directory where the CSV file will be saved.
         output_name (str): Name of the output CSV file.
@@ -289,8 +294,11 @@ def save_cpt_to_csv(data_cpts: list, output_folder: str, output_name: str):
     # Initialize a DataFrame for storing depth and IC data
     df = pd.DataFrame()
 
-    # The first column is the depth (from 0 to 31)
-    df["Depth_Index"] = range(32)
+    # Determine the number of depth pixels from the first CPT
+    n_pixels = len(data_cpts[0]["IC"]) if data_cpts else 32
+
+    # The first column is the depth index (from 0 to n_pixels-1)
+    df["Depth_Index"] = range(n_pixels)
 
     # Add each CPT's compressed IC values as a column
     for cpt in data_cpts:
@@ -495,7 +503,7 @@ if __name__ == "__main__":
     equalized_depth_cpts = equalize_depth(equalized_top_cpts, lowest_min_depth)
 
     # Compress data to 32 points
-    compressed_cpts = compress_to_32px(equalized_depth_cpts, method="mean")
+    compressed_cpts = compress_cpt_data(equalized_depth_cpts, method="mean")
 
     # Plot the original, equalized, and compressed data
     plot_equalized_depth_cpts(
