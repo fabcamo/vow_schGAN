@@ -1,9 +1,7 @@
 import os
 
 # Suppress TensorFlow logging before importing it
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = (
-    "2"  # 0=all, 1=filter INFO, 2=+filter WARNING, 3=+filter ERROR
-)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # 0=all, 1=INFO, 2=WARNING, 3=ERROR
 
 import re
 import sys
@@ -28,13 +26,11 @@ tf.autograph.set_verbosity(0)
 # --------------------------------------------------------------------------------------------
 # CONFIG
 # --------------------------------------------------------------------------------------------
-SECTIONS_DIR = Path(r"C:\VOW\data\test_outputs")  # where the section CSVs are
+SECTIONS_DIR = Path(r"C:\VOW\res\test")  # where the section CSVs are
 PATH_TO_MODEL = Path(r"D:\schemaGAN\h5\schemaGAN.h5")  # generator .h5
-MANIFEST_CSV = Path(r"C:\VOW\data\test_outputs\manifest_sections.csv")
-COORDS_WITH_DIST_CSV = Path(
-    r"C:\VOW\data\schgan_inputs\betuwepand_dike_north\coords_with_distances.csv"
-)
-OUT_DIR = Path(r"C:\VOW\res\testtest")  # where to save outputs
+MANIFEST_CSV = SECTIONS_DIR / "manifest_sections.csv"
+COORDS_WITH_DIST_CSV = SECTIONS_DIR / "cpt_coords_with_distances.csv"
+OUT_DIR = Path(r"C:\VOW\res\test_images")  # where to save outputs
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SIZE_X = 512
@@ -65,44 +61,52 @@ model = load_model(PATH_TO_MODEL, compile=False)
 manifest = pd.read_csv(MANIFEST_CSV)
 coords = pd.read_csv(COORDS_WITH_DIST_CSV)
 
-for col in ["section_index", "span_m", "left_pad_m", "right_pad_m", "start_idx"]:
+required_manifest_cols = [
+    "section_index",
+    "span_m",
+    "left_pad_m",
+    "right_pad_m",
+    "start_idx",
+    "csv_path",
+]
+for col in required_manifest_cols:
     if col not in manifest.columns:
         raise ValueError(f"Manifest missing column: {col}")
 if "cum_along_m" not in coords.columns:
-    raise ValueError("coords_with_distances.csv must contain 'cum_along_m'")
+    raise ValueError("cpt_coords_with_distances.csv must contain 'cum_along_m'")
 
 manifest["section_index"] = manifest["section_index"].astype(int)
 manifest["start_idx"] = manifest["start_idx"].astype(int)
+if "depth_window" in manifest.columns:
+    manifest["depth_window"] = manifest["depth_window"].astype(int)
 
 
-def _parse_section_index(path: Path) -> int:
+def _get_manifest_row_for_file(section_path: Path) -> pd.Series:
     """
-    Extract section index from filenames like:
-      - section_XX_cpts_YYY_to_WWW.csv
-      - schemaGAN_section_XXX.csv   (backward compatible)
+    Find the manifest row corresponding to a given section CSV.
+
+    We match on the filename (basename) of csv_path, so manifest can store
+    absolute or relative paths.
     """
-    s = path.stem
-    m = re.search(r"(?:^|_)section_(\d+)(?:_|$)", s)  # matches both patterns
-    if not m:
-        raise ValueError(f"Cannot parse section index from {path.name}")
-    return int(m.group(1))
+    sec_name = section_path.name
+    matches = manifest[manifest["csv_path"].apply(lambda p: Path(p).name) == sec_name]
+    if matches.empty:
+        raise ValueError(f"No manifest row found whose csv_path ends with '{sec_name}'")
+    return matches.iloc[0]
 
 
-def _sec_x0_dx(sec_index: int) -> tuple[float, float]:
+def _sec_x0_dx_from_manifest_row(r: pd.Series) -> tuple[float, float]:
     """
     Bottom x axis spans meters via:
       x0 = cum_along(first CPT of section) - left_pad_m
       dx = (span + left_pad + right_pad) / (SIZE_X - 1)
 
     Args:
-        sec_index (int): section index
+        r: manifest row for this section CSV
+
     Returns:
-        tuple[float, float]: (x0, dx)
+        (x0, dx)
     """
-    r = manifest.loc[manifest["section_index"] == sec_index]
-    if r.empty:
-        raise ValueError(f"No manifest row for section {sec_index}")
-    r = r.iloc[0]
     total_span = float(r["span_m"] + r["left_pad_m"] + r["right_pad_m"])
     start_idx = int(r["start_idx"])
     m0 = float(coords.loc[start_idx, "cum_along_m"])
@@ -128,13 +132,20 @@ def meters_to_idx(y_m: float) -> float:
 # -------------------
 def run_gan_on_section_csv(csv_path: Path) -> tuple[Path, Path]:
     """
-    Run SchemaGAN on one section CSV and save CSV + PNG image. Returns (csv_out, png_out).
+    Run SchemaGAN on one section CSV and save CSV + PNG image.
+    Returns (csv_out, png_out).
 
     Args:
         csv_path (Path): Path to section CSV file
+
     Returns:
-        tuple[Path, Path]: (csv_out, png_out)
+        (csv_out, png_out)
     """
+    # Look up manifest metadata for this specific file
+    mrow = _get_manifest_row_for_file(csv_path)
+    sec_index = int(mrow["section_index"])
+    depth_win = int(mrow["depth_window"]) if "depth_window" in mrow.index else None
+
     # Load csv and strip Depth_Index column
     df = pd.read_csv(csv_path)
     if df.shape[0] != SIZE_Y:
@@ -159,13 +170,12 @@ def run_gan_on_section_csv(csv_path: Path) -> tuple[Path, Path]:
     gan_res = reverse_IC_normalization(gan_res)
     gan_res = np.squeeze(gan_res)  # (32, 512)
 
-    # Save CSV
+    # Save CSV (the stem already includes z_XX, so it propagates)
     out_csv = OUT_DIR / f"{csv_path.stem}_seed{seed}_gan.csv"
     pd.DataFrame(gan_res).to_csv(out_csv, index=False)
 
     # --------- Dual axes plotting ---------
-    sec_index = _parse_section_index(csv_path)
-    x0, dx = _sec_x0_dx(sec_index)
+    x0, dx = _sec_x0_dx_from_manifest_row(mrow)
     x1 = x0 + (SIZE_X - 1) * dx
 
     out_png = OUT_DIR / f"{csv_path.stem}_seed{seed}_gan.png"
@@ -212,7 +222,12 @@ def run_gan_on_section_csv(csv_path: Path) -> tuple[Path, Path]:
     right = ax.secondary_yaxis("right", functions=(idx_to_meters, meters_to_idx))
     right.set_ylabel("Depth (m)")
 
-    plt.title(f"SchemaGAN Generated Image (Section {sec_index:03d}, Seed: {seed})")
+    if depth_win is not None:
+        title = f"SchemaGAN Generated Image (Section {sec_index:03d}, z_{depth_win:02d}, Seed: {seed})"
+    else:
+        title = f"SchemaGAN Generated Image (Section {sec_index:03d}, Seed: {seed})"
+
+    plt.title(title)
     plt.tight_layout()
     plt.savefig(out_png, dpi=220)
     plt.close()
@@ -224,19 +239,14 @@ def run_gan_on_section_csv(csv_path: Path) -> tuple[Path, Path]:
 # -------------------
 # MAIN LOOP
 # -------------------
-# -------------------
-# MAIN LOOP
-# -------------------
 section_files = sorted(SECTIONS_DIR.glob("section_*_cpts_*.csv"))
 if not section_files:
     raise FileNotFoundError(f"No section CSVs found in {SECTIONS_DIR}")
 
-print(f"[INFO] Found {len(section_files)} section(s) in {SECTIONS_DIR}")
+print(f"[INFO] Found {len(section_files)} section file(s) in {SECTIONS_DIR}")
 
-
-# Create counters for reporting at end
 ok, fail = 0, 0
-# Loop over sections and run GAN
+
 for i, sec in enumerate(section_files, 1):
     try:
         csv_out, png_out = run_gan_on_section_csv(sec)
