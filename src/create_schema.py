@@ -26,7 +26,7 @@ tf.autograph.set_verbosity(0)
 # --------------------------------------------------------------------------------------------
 # CONFIG
 # --------------------------------------------------------------------------------------------
-SECTIONS_DIR = Path(r"C:\VOW\res\test")  # where the section CSVs are
+SECTIONS_DIR = Path(r"C:\VOW\res\test_outputs")  # where the section CSVs are
 PATH_TO_MODEL = Path(r"D:\schemaGAN\h5\schemaGAN.h5")  # generator .h5
 MANIFEST_CSV = SECTIONS_DIR / "manifest_sections.csv"
 COORDS_WITH_DIST_CSV = SECTIONS_DIR / "cpt_coords_with_distances.csv"

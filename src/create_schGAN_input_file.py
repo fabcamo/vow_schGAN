@@ -4,13 +4,16 @@ This script:
   1) Sorts CPT coordinates in a chosen direction (e.g., west→east).
   2) Computes distances: from-first, from-previous, and cumulative-along-chain.
   3) Slides a window of CPTS_PER_SECTION across the sorted list with overlap.
-  4) Maps relative distances (with left/right padding) to 0..N_COLS-1 columns.
-  5) Resolves column collisions and paints a (N_ROWS × N_COLS) grid per section.
-  6) Writes section CSVs, a distances CSV, and a manifest CSV.
+  4) (Optionally) splits CPT data vertically into overlapping windows of N_ROWS_PER_WINDOW.
+  5) Maps relative distances (with left/right padding) to 0..N_COLS-1 columns.
+  6) Resolves column collisions and paints a (N_ROWS_PER_WINDOW × N_COLS) grid per section.
+  7) Writes section CSVs, a distances CSV, and a manifest CSV.
 
 Assumptions:
   - Coordinates CSV has columns: name, x, y
-  - CPT data CSV has one column per CPT name, plus a Depth_Index column with N_ROWS rows
+  - CPT data CSV has one column per CPT name, plus a Depth_Index column with
+    a total number of rows that is >= N_ROWS_PER_WINDOW.
+    The data is split into 32-row "windows" (possibly overlapping) for SchemaGAN.
 """
 
 from pathlib import Path
@@ -318,38 +321,61 @@ def write_section_csv(grid: np.ndarray, out_csv: Path, n_cols: int) -> None:
 def split_cpt_into_windows(
     cpt_df: pd.DataFrame,
     window_rows: int,
-) -> List[Tuple[int, pd.DataFrame]]:
-    """Split CPT data into vertical windows of `window_rows` and reset Depth_Index.
+    vertical_overlap_pct: float,
+) -> List[Tuple[int, int, int, pd.DataFrame]]:
+    """Split CPT data into vertical windows of `window_rows` with optional overlap.
 
     Args:
         cpt_df: Full CPT DataFrame with Depth_Index and CPT columns.
         window_rows: Number of rows per window (e.g. 32 for SchemaGAN).
+        vertical_overlap_pct: Overlap between consecutive windows, in percent.
+                              0   -> non-overlapping windows
+                              50  -> 50% overlap (stride = 16 when window_rows=32)
 
     Returns:
-        List of (depth_index, window_df) where:
-            - depth_index: integer window index (0, 1, 2, ...)
+        List of (window_id, start_row, end_row, window_df), where:
+            - window_id: integer window index (0, 1, 2, ...)
+            - start_row: starting row index (inclusive) in the original cpt_df
+            - end_row: ending row index (exclusive) in the original cpt_df
             - window_df: CPT data slice with Depth_Index reset to 0..window_rows-1
-
-    Raises:
-        AssertionError: If total rows is not a multiple of window_rows.
     """
     total_rows = len(cpt_df)
-    assert (
-        total_rows % window_rows == 0
-    ), f"CPT data has {total_rows} rows, not a multiple of {window_rows}"
+    if total_rows < window_rows:
+        raise ValueError(
+            f"CPT data has {total_rows} rows, which is less than window_rows={window_rows}"
+        )
 
-    n_windows = total_rows // window_rows
-    windows: List[Tuple[int, pd.DataFrame]] = []
+    if vertical_overlap_pct < 0 or vertical_overlap_pct >= 100:
+        raise ValueError("VERTICAL_OVERLAP must be in [0, 100).")
 
-    for k in range(n_windows):
-        start_row = k * window_rows
-        end_row = (k + 1) * window_rows
+    overlap_frac = vertical_overlap_pct / 100.0
+    # stride_rows must be at least 1
+    stride_rows = max(1, int(round(window_rows * (1.0 - overlap_frac))))
 
+    logger.info(
+        f"Splitting CPT data into windows: window_rows={window_rows}, "
+        f"vertical_overlap={vertical_overlap_pct:.1f}%, stride_rows={stride_rows}, "
+        f"total_rows={total_rows}"
+    )
+
+    windows: List[Tuple[int, int, int, pd.DataFrame]] = []
+    k = 0
+    start_row = 0
+
+    # Slide until we can fit a full window_rows block
+    while start_row + window_rows <= total_rows:
+        end_row = start_row + window_rows
         slice_df = cpt_df.iloc[start_row:end_row].copy()
         slice_df = slice_df.reset_index(drop=True)
         slice_df["Depth_Index"] = np.arange(window_rows, dtype=int)
+        windows.append((k, start_row, end_row, slice_df))
+        k += 1
+        start_row += stride_rows
 
-        windows.append((k, slice_df))
+    if not windows:
+        raise RuntimeError(
+            "No windows generated; check window_rows and vertical_overlap_pct."
+        )
 
     return windows
 
@@ -378,6 +404,10 @@ def write_manifest(manifest: List[Dict], out_dir: Path) -> None:
         }
         if "depth_window" in m:
             row["depth_window"] = m["depth_window"]
+        if "depth_start_row" in m:
+            row["depth_start_row"] = m["depth_start_row"]
+        if "depth_end_row" in m:
+            row["depth_end_row"] = m["depth_end_row"]
         rows.append(row)
 
     pd.DataFrame(rows).to_csv(out_dir / "manifest_sections.csv", index=False)
@@ -398,7 +428,9 @@ def process_sections(
     right_pad_frac: float,
     from_where: str,
     to_where: str,
-    depth_index: int | None = None,
+    depth_window: int | None = None,
+    depth_start_row: int | None = None,
+    depth_end_row: int | None = None,
     write_distances: bool = True,
 ) -> List[Dict]:
     """Orchestrate the full pipeline and return a manifest of produced sections.
@@ -423,8 +455,10 @@ def process_sections(
         right_pad_frac: Right padding as a fraction of the section span.
         from_where: Sort start direction ('west','east','north','south').
         to_where: Sort end direction ('west','east','north','south').
-        depth_index: Optional vertical window index (0,1,2,...). Used in filenames
-                     and manifest (e.g. z_00, z_01). If None, no depth tag is used.
+        depth_window: Optional vertical window index (0,1,2,...). Used in filenames
+                      and manifest (e.g. z_00, z_01). If None, no depth tag is used.
+        depth_start_row: Optional start row index (inclusive) in original CPT data.
+        depth_end_row: Optional end row index (exclusive) in original CPT data.
         write_distances: If True, write cpt_coords_with_distances.csv.
 
     Returns:
@@ -492,16 +526,16 @@ def process_sections(
         )
 
         # Build base filename with optional depth tag
-        if depth_index is None:
+        if depth_window is None:
             base_name = f"section_{i:02d}"
         else:
-            base_name = f"section_{i:02d}_z_{depth_index:02d}"
+            base_name = f"section_{i:02d}_z_{depth_window:02d}"
 
         out_csv = out_dir / f"{base_name}_cpts_{start+1:03d}_to_{end:03d}.csv"
         write_section_csv(grid, out_csv, n_cols)
 
         # Collect manifest info
-        entry = {
+        entry: Dict = {
             "section_index": i,
             "start_idx": int(start),
             "end_idx": int(end - 1),
@@ -516,8 +550,12 @@ def process_sections(
             "painted": painted,
             "skipped": skipped,
         }
-        if depth_index is not None:
-            entry["depth_window"] = int(depth_index)
+        if depth_window is not None:
+            entry["depth_window"] = int(depth_window)
+        if depth_start_row is not None:
+            entry["depth_start_row"] = int(depth_start_row)
+        if depth_end_row is not None:
+            entry["depth_end_row"] = int(depth_end_row)
 
         manifest.append(entry)
 
@@ -537,12 +575,15 @@ if __name__ == "__main__":
     CPT_DATA_CSV = Path(
         r"C:\VOW\res\south\exp_3\2_compressed_cpt\compressed_cpt_data_mean_128px.csv"
     )
-    OUT_DIR = Path(r"C:\VOW\res")
+    OUT_DIR = Path(r"C:\VOW\res\test_outputs")
 
     N_COLS = 512
     N_ROWS_PER_WINDOW = 32  # SchemaGAN image height
+
     CPTS_PER_SECTION = 6
-    OVERLAP_CPTS = 2
+    OVERLAP_CPTS = 2  # horizontal overlap in CPT count
+    VERTICAL_OVERLAP = 0  # [%] 0.0 = no vertical overlap; 50.0 = 50% overlap
+
     LEFT_PAD_FRACTION = 0.10
     RIGHT_PAD_FRACTION = 0.10
     DIR_FROM, DIR_TO = "west", "east"
@@ -553,16 +594,20 @@ if __name__ == "__main__":
     coords_df = pd.read_csv(COORDS_CSV)
     cpt_df_full = pd.read_csv(CPT_DATA_CSV)
 
-    # Split full CPT table into stacked 32-row windows (0,1,2,...)
+    # Split full CPT table into stacked (possibly overlapping) 32-row windows
     depth_windows = split_cpt_into_windows(
         cpt_df=cpt_df_full,
         window_rows=N_ROWS_PER_WINDOW,
+        vertical_overlap_pct=VERTICAL_OVERLAP,
     )
 
     all_manifests: List[Dict] = []
 
-    for w_idx, cpt_df_win in depth_windows:
-        logger.info(f"Processing depth window z_{w_idx:02d} ...")
+    for w_idx, start_row, end_row, cpt_df_win in depth_windows:
+        logger.info(
+            f"Processing depth window z_{w_idx:02d} "
+            f"(rows {start_row}..{end_row-1} of original CPT data) ..."
+        )
 
         # Validate this window has the expected number of rows
         validate_input_files(coords_df, cpt_df_win, N_ROWS_PER_WINDOW)
@@ -582,7 +627,9 @@ if __name__ == "__main__":
             right_pad_frac=RIGHT_PAD_FRACTION,
             from_where=DIR_FROM,
             to_where=DIR_TO,
-            depth_index=w_idx,
+            depth_window=w_idx,
+            depth_start_row=start_row,
+            depth_end_row=end_row,
             write_distances=write_dists,
         )
 
