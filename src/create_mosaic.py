@@ -12,6 +12,9 @@ COORDS_WITH_DIST_CSV = Path(r"C:\VOW\res\test_outputs\cpt_coords_with_distances.
 # Where the *_gan.csv files are (output of the GAN script)
 GAN_DIR = Path(r"C:\VOW\res\test_images")
 
+# File suffix to look for (e.g., "gan" or "uncertainty")
+FILE_SUFFIX = "gan"
+
 # Where to save mosaic csv/png
 OUT_DIR = Path(r"C:\VOW\res\test_images")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -79,15 +82,15 @@ def load_inputs(manifest_csv: Path, coords_csv: Path):
 
 def find_latest_gan_csv_for_row(row):
     """
-    Find the newest *_gan.csv file for a given manifest row.
+    Find the newest file matching FILE_SUFFIX for a given manifest row.
 
     Uses the stem of csv_path so this works with depth windows:
       csv_path = ".../section_01_z_00_cpts_001_to_006.csv"
       -> look for files like:
-         "section_01_z_00_cpts_001_to_006_seed*_gan.csv"
+         "section_01_z_00_cpts_001_to_006_seed*_{FILE_SUFFIX}.csv"
     """
     section_stem = Path(row["csv_path"]).stem
-    pattern = f"{section_stem}_seed*_gan.csv"
+    pattern = f"{section_stem}_seed*_{FILE_SUFFIX}.csv"
     candidates = list(GAN_DIR.glob(pattern))
     if not candidates:
         return None
@@ -318,8 +321,27 @@ def plot_mosaic(
     out_png: Path,
     coords=None,
     show_cpt_locations=True,
+    vmin=0,
+    vmax=4.5,
+    cmap="viridis",
+    colorbar_label="Value",
 ):
-    """Plot the mosaic with dual axes and save as PNG."""
+    """Plot the mosaic with dual axes and save as PNG.
+
+    Args:
+        mosaic: 2D numpy array of the mosaic
+        xmin: Minimum x-coordinate in meters
+        xmax: Maximum x-coordinate in meters
+        global_dx: Pixel size in meters
+        n_rows_total: Total number of rows
+        out_png: Output PNG path
+        coords: Coordinates dataframe (optional)
+        show_cpt_locations: Whether to show CPT markers
+        vmin: Minimum value for colormap (None = auto)
+        vmax: Maximum value for colormap (None = auto)
+        cmap: Colormap name
+        colorbar_label: Label for colorbar
+    """
     horiz_m = xmax - xmin
     vert_m = abs(Y_BOTTOM_M - Y_TOP_M)
 
@@ -330,13 +352,13 @@ def plot_mosaic(
     fig, ax = plt.subplots(figsize=(base_width, height))
     im = ax.imshow(
         mosaic,
-        cmap="viridis",
-        vmin=0,
-        vmax=4.5,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
         aspect="auto",
         extent=[xmin, xmax, n_rows_total - 1, 0],
     )
-    plt.colorbar(im, label="Value")
+    plt.colorbar(im, label=colorbar_label)
 
     # Add vertical lines at CPT positions if enabled and coords provided
     if show_cpt_locations and coords is not None and "cum_along_m" in coords.columns:

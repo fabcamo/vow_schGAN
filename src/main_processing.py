@@ -2,13 +2,14 @@
 Main script for the VOW SchemaGAN pipeline.
 
 This script orchestrates the complete workflow by calling individual script functions:
-1. Setup experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic)
+1. Setup experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic, 7_uncertainty)
 2. Extract coordinates from CPT files (calls extract_coords.py)
 3. Extract and compress CPT data (calls extract_data.py)
 4. Create sections for SchemaGAN input (calls create_schGAN_input_file.py)
 5. Generate schemas using trained SchemaGAN model (calls create_schema.py → 4_gan_images)
 6. Enhance schemas with boundary sharpening (calls boundary_enhancement.py → 5_enhance)
 7. Create mosaics from generated schemas (calls create_mosaic.py → 6_mosaic, creates both original and enhanced)
+8. Compute prediction uncertainty using MC Dropout (calls uncertainty_quantification.py → 7_uncertainty)
 
 Configure the paths and parameters in the CONFIG section below.
 """
@@ -54,8 +55,15 @@ from utils import setup_experiment
 # Base configuration
 RES_DIR = Path(r"C:\VOW\res")
 REGION = "north"
-EXP_NAME = "exp_10"
-DESCRIPTION = "CPT compression to 64, 3 CPT overlap, 50% vertical overlap. 10% padding. Added boundary enhancement."
+EXP_NAME = "exp_11"
+DESCRIPTION = (
+    "CPT compression to 64,"
+    "3 CPT overlap,"
+    "50% vertical overlap,"
+    "10% padding,"
+    "Added boundary enhancement,"
+    "Added uncertainty quantification,"
+)
 
 # Input data paths
 CPT_FOLDER = Path(r"C:\VOW\data\cpts\betuwepand\dike_north_BRO")
@@ -92,6 +100,14 @@ ENHANCE_METHOD = "none"  # Enhancement method to sharpen layer boundaries
 #   "dense_crf": Dense CRF edge-aware smoothing (experimental, ineffective)
 #   "none" or None: No enhancement (use original GAN output)
 
+# Uncertainty Quantification (Monte Carlo Dropout)
+COMPUTE_UNCERTAINTY = True  # Compute prediction uncertainty using MC Dropout
+N_MC_SAMPLES = (
+    50  # Number of MC Dropout samples (20-100 typical, more = slower but more accurate)
+)
+# MC Dropout reveals where the GAN is uncertain in its predictions:
+#   - High uncertainty: complex transitions, far from data, ambiguous interpolations
+#   - Low uncertainty: near CPT locations, homogeneous layers, clear patterns
 
 LEFT_PAD_FRACTION = 0.1  # Left padding as fraction of section span
 RIGHT_PAD_FRACTION = 0.1  # Right padding as fraction of section span
@@ -397,6 +413,9 @@ def run_schema_generation(
     model_path: Path,
     y_top_m: float,
     y_bottom_m: float,
+    uncertainty_folder: Optional[Path] = None,
+    compute_uncertainty: bool = False,
+    n_mc_samples: int = 50,
 ):
     """Generate detailed subsurface schemas using trained SchemaGAN model.
 
@@ -404,12 +423,17 @@ def run_schema_generation(
     through the trained SchemaGAN generator network, and produces detailed subsurface
     schemas as both CSV data and PNG visualizations with proper coordinate axes.
 
+    Optionally computes prediction uncertainty using Monte Carlo Dropout.
+
     Args:
         sections_folder: Path to folder containing section CSV files and manifest.
         gan_images_folder: Output folder for generated schema images and data.
         model_path: Path to trained SchemaGAN model file (.h5).
         y_top_m: Top depth in meters (e.g., 6.8 for 6.8m below surface).
         y_bottom_m: Bottom depth in meters (e.g., -13.1 for 13.1m below surface).
+        uncertainty_folder: Output folder for uncertainty maps (if computing uncertainty).
+        compute_uncertainty: Whether to compute MC Dropout uncertainty.
+        n_mc_samples: Number of MC samples for uncertainty estimation.
 
     Returns:
         tuple: (success_count, fail_count)
@@ -447,6 +471,11 @@ def run_schema_generation(
     from tensorflow.keras.models import load_model
     import matplotlib.pyplot as plt
     from utils import IC_normalization, reverse_IC_normalization
+    from uncertainty_quantification import (
+        compute_mc_dropout_uncertainty,
+        visualize_uncertainty,
+        save_uncertainty_csv,
+    )
     import re
 
     # Load model
@@ -594,6 +623,77 @@ def run_schema_generation(
                 f"[{i:03d}/{len(section_files)}] Generated: {output_csv.name} & {output_png.name}"
             )
 
+            # Compute uncertainty using Monte Carlo Dropout if enabled
+            if compute_uncertainty and uncertainty_folder is not None:
+                try:
+                    logger.info(
+                        f"[{i:03d}/{len(section_files)}] Computing MC Dropout uncertainty ({n_mc_samples} samples)..."
+                    )
+                    trace(f"MC Dropout: Starting {n_mc_samples} forward passes")
+
+                    logger.debug(f"Input shape for uncertainty: {cs_norm.shape}")
+
+                    # Compute uncertainty (mean and std) using MC Dropout
+                    pred_mean, pred_std = compute_mc_dropout_uncertainty(
+                        model, cs_norm, n_samples=n_mc_samples
+                    )
+
+                    logger.debug(
+                        f"MC Dropout output shapes - mean: {pred_mean.shape}, std: {pred_std.shape}"
+                    )
+
+                    # Denormalize mean prediction
+                    pred_mean_denorm = reverse_IC_normalization(pred_mean)
+
+                    # Ensure shapes are correct (32, 512)
+                    if pred_std.shape != (N_ROWS, N_COLS):
+                        logger.warning(
+                            f"Uncertainty shape mismatch: got {pred_std.shape}, expected ({N_ROWS}, {N_COLS}). Reshaping..."
+                        )
+                        # If there's a channel dimension, remove it
+                        if pred_std.ndim == 3:
+                            pred_std = pred_std[:, :, 0]
+                        if pred_mean_denorm.ndim == 3:
+                            pred_mean_denorm = pred_mean_denorm[:, :, 0]
+
+                    logger.debug(f"Final uncertainty map shape: {pred_std.shape}")
+
+                    # Save uncertainty CSV (match GAN output naming)
+                    uncertainty_csv = (
+                        uncertainty_folder
+                        / f"{section_file.stem}_seed{seed}_uncertainty.csv"
+                    )
+                    save_uncertainty_csv(pred_std, uncertainty_csv)
+                    logger.info(f"[INFO] Saved uncertainty CSV: {uncertainty_csv.name}")
+                    trace(f"Uncertainty CSV saved: {uncertainty_csv}")
+
+                    # Create uncertainty visualization (match GAN output naming)
+                    uncertainty_png = (
+                        uncertainty_folder
+                        / f"{section_file.stem}_seed{seed}_uncertainty.png"
+                    )
+                    visualize_uncertainty(
+                        uncertainty_map=pred_std,
+                        output_png=uncertainty_png,
+                        x0=x0,
+                        x1=x1,
+                        y_top_m=y_top_m,
+                        y_bottom_m=y_bottom_m,
+                        cpt_positions=cpt_positions,
+                        show_cpt_locations=SHOW_CPT_LOCATIONS,
+                        mean_prediction=pred_mean_denorm,
+                    )
+                    logger.info(
+                        f"[INFO] Created uncertainty PNG: {uncertainty_png.name}"
+                    )
+                    trace(f"Uncertainty PNG saved: {uncertainty_png}")
+
+                except Exception as ue:
+                    logger.warning(
+                        f"[{i:03d}/{len(section_files)}] Failed to compute uncertainty: {ue}"
+                    )
+                    trace(f"Uncertainty computation failed: {ue}")
+
         except Exception as e:
             fail_count += 1
             logger.error(
@@ -615,6 +715,7 @@ def run_mosaic_creation(
     y_top_m: float,
     y_bottom_m: float,
     mosaic_prefix: str = "schemaGAN",
+    file_suffix: str = "gan",
 ):
     """Combine all generated schema sections into a seamless mosaic with vertical stacking.
 
@@ -630,6 +731,8 @@ def run_mosaic_creation(
         y_top_m: Top depth in meters for visualization axis.
         y_bottom_m: Bottom depth in meters for visualization axis.
         mosaic_prefix: Prefix for output files (e.g., \"original\", \"enhanced\").
+        file_suffix: Suffix for input files (e.g., \"gan\", \"uncertainty\").
+            Files will be matched as *_{file_suffix}.csv
 
     Raises:
         RuntimeError: If no valid GAN CSV files are found.
@@ -658,13 +761,13 @@ def run_mosaic_creation(
     trace(f"Mosaic output folder ready: {mosaic_folder}")
 
     # Check if we have generated schemas
-    gan_files = list(gan_images_folder.glob("*_gan.csv"))
+    gan_files = list(gan_images_folder.glob(f"*_{file_suffix}.csv"))
     if not gan_files:
-        logger.warning("No generated schema files found. Skipping mosaic creation.")
+        logger.warning(f"No {file_suffix} files found. Skipping mosaic creation.")
         return
 
-    logger.info(f"Creating mosaic from {len(gan_files)} generated schemas...")
-    trace(f"GAN CSV count for mosaic: {len(gan_files)}")
+    logger.info(f"Creating mosaic from {len(gan_files)} {file_suffix} files...")
+    trace(f"{file_suffix} CSV count for mosaic: {len(gan_files)}")
 
     # Load manifest and coordinates
     manifest_csv = sections_folder / "manifest_sections.csv"
@@ -699,15 +802,17 @@ def run_mosaic_creation(
     original_n_rows = create_mosaic.N_ROWS_WINDOW
     original_y_top = create_mosaic.Y_TOP_M
     original_y_bottom = create_mosaic.Y_BOTTOM_M
+    original_file_suffix = getattr(create_mosaic, "FILE_SUFFIX", "gan")
 
     create_mosaic.GAN_DIR = gan_images_folder
     create_mosaic.N_COLS = N_COLS
     create_mosaic.N_ROWS_WINDOW = N_ROWS
     create_mosaic.Y_TOP_M = y_top_m
     create_mosaic.Y_BOTTOM_M = y_bottom_m
+    create_mosaic.FILE_SUFFIX = file_suffix
 
     # Add GAN file paths to manifest using the external module's function
-    logger.info("Matching GAN CSV files to sections...")
+    logger.info(f"Matching {file_suffix} CSV files to sections...")
     manifest["gan_csv"] = manifest.apply(
         lambda row: find_latest_gan_csv_for_row(row), axis=1
     )
@@ -768,6 +873,18 @@ def run_mosaic_creation(
     mosaic_png = mosaic_folder / f"{mosaic_prefix}_mosaic.png"
     logger.info(f"Creating mosaic visualization: {mosaic_png}")
 
+    # Set visualization parameters based on data type
+    if file_suffix == "uncertainty":
+        # For uncertainty: auto-scale, use 'hot' colormap
+        vmin_val, vmax_val = None, None
+        cmap_val = "hot"
+        colorbar_label = "Uncertainty (Std Dev)"
+    else:
+        # For GAN/enhanced: fixed scale for IC values
+        vmin_val, vmax_val = 0, 4.5
+        cmap_val = "viridis"
+        colorbar_label = "IC Value"
+
     try:
         plot_mosaic(
             mosaic,
@@ -778,6 +895,10 @@ def run_mosaic_creation(
             mosaic_png,
             coords=coords,
             show_cpt_locations=SHOW_CPT_LOCATIONS,
+            vmin=vmin_val,
+            vmax=vmax_val,
+            cmap=cmap_val,
+            colorbar_label=colorbar_label,
         )
     except Exception as e:
         logger.error(f"Failed to plot mosaic: {e}")
@@ -795,6 +916,7 @@ def run_mosaic_creation(
     create_mosaic.N_ROWS_WINDOW = original_n_rows
     create_mosaic.Y_TOP_M = original_y_top
     create_mosaic.Y_BOTTOM_M = original_y_bottom
+    create_mosaic.FILE_SUFFIX = original_file_suffix
 
     logger.info(f"Mosaic complete: {mosaic_csv.name} & {mosaic_png.name}")
     logger.info("Step 6 complete.")
@@ -910,14 +1032,15 @@ def run_enhancement(
 def main():
     """Execute the complete VOW SchemaGAN pipeline.
 
-    Orchestrates all seven steps of the workflow:
-    1. Creates experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic)
+    Orchestrates all eight steps of the workflow:
+    1. Creates experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic, 7_uncertainty)
     2. Extracts and validates CPT coordinates from GEF files
     3. Processes CPT data and compresses to specified depth resolution
     4. Creates spatial sections with overlapping CPTs
     5. Generates schemas using SchemaGAN model (saved to 4_gan_images)
     6. Enhances schemas with boundary sharpening (if enabled, saved to 5_enhance)
     7. Assembles sections into mosaics (creates both original and enhanced mosaics)
+    8. Computes prediction uncertainty using MC Dropout (if enabled, saved to 7_uncertainty)
 
     All configuration is taken from module-level CONFIG constants.
     Results are saved in: {RES_DIR}/{REGION}/{EXP_NAME}/
@@ -1081,6 +1204,9 @@ def main():
                 SCHGAN_MODEL_PATH,
                 y_top_final,
                 y_bottom_final,
+                uncertainty_folder=folders["7_uncertainty"],
+                compute_uncertainty=COMPUTE_UNCERTAINTY,
+                n_mc_samples=N_MC_SAMPLES,
             )
             logger.info("[DEBUG] Schema generation completed successfully")
         except Exception as e:
@@ -1172,6 +1298,49 @@ def main():
             # Don't return here, original mosaic was already created
     else:
         logger.info("Skipping enhanced mosaic (no enhancement applied)")
+
+    # =============================================================================
+    # 8. CREATE UNCERTAINTY MOSAIC (IF UNCERTAINTY COMPUTED)
+    # =============================================================================
+    if COMPUTE_UNCERTAINTY:
+        logger.info("=" * 60)
+        logger.info("Step 8: Creating uncertainty mosaic from MC Dropout results...")
+        logger.info("[DEBUG] About to create uncertainty mosaic...")
+
+        try:
+            # Collect all uncertainty CSV files
+            uncertainty_files = sorted(
+                folders["7_uncertainty"].glob("*_uncertainty.csv")
+            )
+
+            if len(uncertainty_files) == 0:
+                logger.warning("No uncertainty files found. Skipping mosaic creation.")
+            else:
+                logger.info(f"[DEBUG] Found {len(uncertainty_files)} uncertainty files")
+
+                # Create mosaic from uncertainty maps using same function as GAN/enhanced
+                run_mosaic_creation(
+                    folders["3_sections"],
+                    folders["7_uncertainty"],
+                    folders["7_uncertainty"],
+                    y_top_final,
+                    y_bottom_final,
+                    mosaic_prefix="uncertainty",
+                    file_suffix="uncertainty",  # Look for *_uncertainty.csv instead of *_gan.csv
+                )
+                logger.info(
+                    "[DEBUG] Uncertainty mosaic creation completed successfully"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to create uncertainty mosaic: {e}")
+            logger.error(f"[DEBUG] Uncertainty mosaic exception: {e}")
+            import traceback
+
+            logger.error(f"[DEBUG] Traceback: {traceback.format_exc()}")
+            # Don't return here, other results are still valid
+    else:
+        logger.info("Skipping uncertainty quantification (COMPUTE_UNCERTAINTY=False)")
 
     # =============================================================================
     # COMPLETION
