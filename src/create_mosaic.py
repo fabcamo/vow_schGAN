@@ -121,17 +121,27 @@ def compute_section_placement(row, coords):
     return x0, dx, x1
 
 
-def choose_global_grid(manifest):
+def choose_global_grid(manifest, coords):
     """
     Compute the global horizontal range (meters) and pixel size.
     The mosaic will use a uniform GLOBAL_DX in meters per pixel.
+
+    Uses actual CPT positions (not padded section bounds) to determine extent,
+    so the mosaic doesn't extend beyond real data with artificial padding.
     """
-    xmin = float(manifest["x0"].min())
-    xmax = float(manifest["x1"].max())
+    # Use actual CPT positions to determine the true data extent
+    xmin = float(coords["cum_along_m"].min())
+    xmax = float(coords["cum_along_m"].max())
 
     # Use median section dx if not provided
     dx = GLOBAL_DX if GLOBAL_DX is not None else float(np.median(manifest["dx"]))
     width = int(round((xmax - xmin) / dx)) + 1
+
+    print(
+        f"[INFO] Global grid based on actual CPT positions: "
+        f"{xmin:.2f}..{xmax:.2f} m (span: {xmax - xmin:.2f} m)"
+    )
+
     return xmin, xmax, dx, width
 
 
@@ -229,8 +239,8 @@ def build_mosaic(manifest, coords):
     manifest["dx"] = dx_list
     manifest["x1"] = x1_list
 
-    # Global horizontal grid
-    xmin, xmax, global_dx, width = choose_global_grid(manifest)
+    # Global horizontal grid (based on actual CPT positions, not padded sections)
+    xmin, xmax, global_dx, width = choose_global_grid(manifest, coords)
     print(
         f"[INFO] Global extent: {xmin:.2f}..{xmax:.2f} m "
         f"({xmax - xmin:.2f} m), dx={global_dx:.4f} m/px, width={width} px"

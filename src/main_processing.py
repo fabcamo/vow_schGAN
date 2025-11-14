@@ -52,19 +52,19 @@ from utils import setup_experiment
 
 # Base configuration
 RES_DIR = Path(r"C:\VOW\res")
-REGION = "south"
-EXP_NAME = "exp_7"
-DESCRIPTION = "CPT compression to 320, 2 CPT overlap, 50% vertical overlap."
+REGION = "north"
+EXP_NAME = "exp_9"
+DESCRIPTION = "CPT compression to 64, 3 CPT overlap, 50% vertical overlap. 10% padding"
 
 # Input data paths
-CPT_FOLDER = Path(r"C:\VOW\data\cpts\betuwepand\dike_south_BRO")
+CPT_FOLDER = Path(r"C:\VOW\data\cpts\betuwepand\dike_north_BRO")
 SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")
 
 # Processing parameters
 COMPRESSION_METHOD = "mean"  # "mean" or "max" for IC value compression
 
 # CPT Data Compression - can be different from model input size
-CPT_DEPTH_PIXELS = 128  # Number of depth levels to compress raw CPT data to
+CPT_DEPTH_PIXELS = 64  # Number of depth levels to compress raw CPT data to
 # Can be 32, 64, 128, etc. independent of N_ROWS
 # Higher values preserve more detail from raw CPT data
 
@@ -74,15 +74,15 @@ N_ROWS = 32  # Number of rows in sections (SchemaGAN expects 32)
 # If CPT_DEPTH_PIXELS != N_ROWS, resampling will occur in section creation
 
 CPTS_PER_SECTION = 6  # Number of CPTs per section
-OVERLAP_CPTS = 2  # Number of overlapping CPTs between sections (horizontal)
+OVERLAP_CPTS = 3  # Number of overlapping CPTs between sections (horizontal)
 
 # Vertical windowing parameters
 VERTICAL_OVERLAP = 50  # [%] Vertical overlap between depth windows (0.0 = no overlap, 50.0 = 50% overlap)
 # Only used if CPT_DEPTH_PIXELS > N_ROWS
 # Example: With 128px CPT data and 32px windows, 0% overlap = 4 windows, 50% overlap = 7 windows
 
-LEFT_PAD_FRACTION = 0.10  # Left padding as fraction of section span
-RIGHT_PAD_FRACTION = 0.10  # Right padding as fraction of section span
+LEFT_PAD_FRACTION = 0.1  # Left padding as fraction of section span
+RIGHT_PAD_FRACTION = 0.1  # Right padding as fraction of section span
 DIR_FROM, DIR_TO = "west", "east"  # Sorting direction
 
 # Optional: Real depth range for visualization (will be computed if None)
@@ -261,6 +261,30 @@ def run_section_creation(
     coords_df = pd.read_csv(coords_csv)
     cpt_df_full = pd.read_csv(cpt_csv)
 
+    # Adjust padding strategy based on horizontal overlap
+    # Strategy: With overlap, use modest padding for blending
+    #           Without overlap, use extended padding to fill gaps between CPT groups
+    actual_left_pad = left_pad
+    actual_right_pad = right_pad
+
+    if overlap == 0:
+        # With no CPT overlap, sections cover different CPT groups
+        # Use larger padding (50%) to extend sections and fill gaps between groups
+        logger.info(
+            "No horizontal overlap (overlap=0) detected. "
+            "Using extended padding (50%) to fill gaps between CPT groups."
+        )
+        actual_left_pad = 0.50
+        actual_right_pad = 0.50
+    else:
+        # With CPT overlap, use configured padding for smooth blending
+        actual_left_pad = left_pad
+        actual_right_pad = right_pad
+        logger.info(
+            f"Horizontal overlap detected (overlap={overlap}). "
+            f"Using padding: left={actual_left_pad:.2%}, right={actual_right_pad:.2%}"
+        )
+
     # Determine if we need vertical windowing
     total_cpt_rows = len(cpt_df_full)
 
@@ -280,8 +304,8 @@ def run_section_creation(
             n_rows=n_rows,
             per=cpts_per_section,
             overlap=overlap,
-            left_pad_frac=left_pad,
-            right_pad_frac=right_pad,
+            left_pad_frac=actual_left_pad,
+            right_pad_frac=actual_right_pad,
             from_where=dir_from,
             to_where=dir_to,
             depth_window=None,  # No depth windowing
@@ -328,8 +352,8 @@ def run_section_creation(
                 n_rows=n_rows,
                 per=cpts_per_section,
                 overlap=overlap,
-                left_pad_frac=left_pad,
-                right_pad_frac=right_pad,
+                left_pad_frac=actual_left_pad,
+                right_pad_frac=actual_right_pad,
                 from_where=dir_from,
                 to_where=dir_to,
                 depth_window=w_idx,
@@ -472,12 +496,17 @@ def run_schema_generation(
                 r = r.iloc[0]
                 total_span = float(r["span_m"] + r["left_pad_m"] + r["right_pad_m"])
                 start_idx = int(r["start_idx"])
+                end_idx = int(r["end_idx"])
                 m0 = float(coords_df.loc[start_idx, "cum_along_m"])
                 x0 = m0 - float(r["left_pad_m"])
                 dx = 1.0 if total_span <= 0 else total_span / (SIZE_X - 1)
                 x1 = x0 + (SIZE_X - 1) * dx
+
+                # Get CPT positions for this section (for markers)
+                cpt_positions = coords_df.loc[start_idx:end_idx, "cum_along_m"].values
             else:
                 x0, x1, dx = 0, SIZE_X - 1, 1
+                cpt_positions = []
 
             # Create and save PNG
             output_png = gan_images_folder / f"{section_file.stem}_seed{seed}_gan.png"
@@ -524,11 +553,25 @@ def run_schema_generation(
             )
             right.set_ylabel("Depth (m)")
 
+            # Add vertical lines at CPT positions (for all sections/depth windows)
+            for cpt_x in cpt_positions:
+                ax.axvline(
+                    x=cpt_x,
+                    color="black",
+                    linewidth=1,
+                    linestyle="-",
+                    alpha=0.5,
+                    zorder=10,
+                )
+
+            # Explicitly set x-limits to prevent whitespace beyond image extent
+            ax.set_xlim(x0, x1)
+
             plt.title(
                 f"SchemaGAN Generated Image (Section {sec_index:03d}, Seed: {seed})"
             )
             plt.tight_layout()
-            plt.savefig(output_png, dpi=220)
+            plt.savefig(output_png, dpi=220, bbox_inches="tight")
             plt.close()
             logger.info(f"[INFO] Created GAN PNG: {output_png.name}")
             trace(f"GAN PNG saved: {output_png}")
