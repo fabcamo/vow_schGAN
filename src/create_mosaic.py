@@ -344,6 +344,7 @@ def plot_mosaic(
     vmax=4.5,
     cmap="viridis",
     colorbar_label="Value",
+    ic_boundaries=None,
 ):
     """Plot the mosaic with dual axes and save as PNG.
 
@@ -358,9 +359,12 @@ def plot_mosaic(
         show_cpt_locations: Whether to show CPT markers
         vmin: Minimum value for colormap (None = auto)
         vmax: Maximum value for colormap (None = auto)
-        cmap: Colormap name
+        cmap: Colormap name or object
         colorbar_label: Label for colorbar
+        ic_boundaries: Tuple of (IC_MIN, IC_YELLOW_ORANGE, IC_ORANGE_RED, IC_MAX) for custom ticks
     """
+    import matplotlib.colors as mcolors
+
     horiz_m = xmax - xmin
     vert_m = abs(Y_BOTTOM_M - Y_TOP_M)
 
@@ -370,19 +374,43 @@ def plot_mosaic(
 
     fig, ax = plt.subplots(figsize=(base_width, height))
 
+    # Set up colormap with black for out-of-range values (unless using uncertainty colormap)
+    if cmap == "viridis" and vmin is not None and vmax is not None:
+        cmap_obj = plt.cm.viridis.copy()
+        cmap_obj.set_under("black")
+        cmap_obj.set_over("black")
+        extend = "both"
+    elif isinstance(cmap, str) and cmap == "hot":
+        # Uncertainty colormap - no clipping
+        cmap_obj = cmap
+        extend = "neither"
+    elif hasattr(cmap, "set_under"):
+        # Custom colormap object (like our custom IC colormap)
+        cmap_obj = cmap
+        extend = "both"
+    else:
+        cmap_obj = cmap
+        extend = "neither"
+
     # For imshow with extent, pixel centers are placed at coordinate positions
     # To make pixels fill the entire extent, we need to shift by half a pixel
     # Pixel edges: xmin - dx/2 to xmax + dx/2
     # Vertical: -0.5 to n_rows_total - 0.5 (so pixels 0...n_rows_total-1 fill the space)
     im = ax.imshow(
         mosaic,
-        cmap=cmap,
+        cmap=cmap_obj,
         vmin=vmin,
         vmax=vmax,
         aspect="auto",
         extent=[xmin - global_dx / 2, xmax + global_dx / 2, n_rows_total - 0.5, -0.5],
     )
-    plt.colorbar(im, label=colorbar_label)
+
+    cbar = plt.colorbar(im, label=colorbar_label, extend=extend)
+
+    # Set custom ticks at color boundaries if provided
+    if ic_boundaries is not None:
+        cbar.set_ticks(list(ic_boundaries))
+        cbar.set_ticklabels([f"{val:g}" for val in ic_boundaries])
 
     # Add vertical lines at CPT positions if enabled and coords provided
     # Only show CPTs that are within the mosaic extent

@@ -29,6 +29,83 @@ VERBOSE = (
 logger = None
 
 
+# =============================================================================
+# COLOR SCALE CONFIGURATION - Edit these values to change the color boundaries
+# =============================================================================
+# Three-category color scale for IC values:
+# Category 1 (Yellow): IC_MIN to IC_YELLOW_ORANGE_BOUNDARY
+# Category 2 (Orange): IC_YELLOW_ORANGE_BOUNDARY to IC_ORANGE_RED_BOUNDARY
+# Category 3 (Red):    IC_ORANGE_RED_BOUNDARY to IC_MAX
+# Everything outside IC_MIN to IC_MAX will be black
+
+IC_MIN = 1.3  # Minimum IC value (start of yellow)
+IC_YELLOW_ORANGE_BOUNDARY = 2.0  # Boundary between yellow and orange
+IC_ORANGE_RED_BOUNDARY = 3.4  # Boundary between orange and red
+IC_MAX = 4.2  # Maximum IC value (end of red)
+# =============================================================================
+
+
+def create_custom_ic_colormap():
+    """Create custom segmented colormap for IC values.
+
+    Uses the global configuration variables:
+    - IC_MIN: Start of yellow range
+    - IC_YELLOW_ORANGE_BOUNDARY: Yellow to orange transition
+    - IC_ORANGE_RED_BOUNDARY: Orange to red transition
+    - IC_MAX: End of red range
+
+    Returns three-category colormap with sharp boundaries and black for out-of-range values.
+    """
+    from matplotlib.colors import ListedColormap
+    import numpy as np
+
+    # Use global configuration
+    vmin = IC_MIN
+    vmax = IC_MAX
+    yellow_end = IC_YELLOW_ORANGE_BOUNDARY
+    orange_end = IC_ORANGE_RED_BOUNDARY
+
+    # Total number of discrete colors
+    n_bins = 256
+
+    # Proportion of each segment
+    yellow_prop = (yellow_end - vmin) / (vmax - vmin)
+    orange_prop = (orange_end - yellow_end) / (vmax - vmin)
+    red_prop = (vmax - orange_end) / (vmax - vmin)
+
+    # Number of bins for each segment
+    n_yellow = int(n_bins * yellow_prop)
+    n_orange = int(n_bins * orange_prop)
+    n_red = n_bins - n_yellow - n_orange
+
+    # Build color array with pure color gradients (no cross-segment blending)
+    color_array = []
+
+    # Yellow segment: dark yellow to bright yellow
+    for i in range(n_yellow):
+        intensity = 0.5 + 0.5 * (i / max(n_yellow - 1, 1))  # 0.5 to 1.0
+        color_array.append([1.0, 1.0, 0.0, intensity])  # Pure yellow with varying alpha
+
+    # Orange segment: dark orange to bright orange
+    for i in range(n_orange):
+        intensity = 0.5 + 0.5 * (i / max(n_orange - 1, 1))  # 0.5 to 1.0
+        color_array.append(
+            [1.0, 0.647, 0.0, intensity]
+        )  # Pure orange with varying alpha
+
+    # Red segment: dark red to bright red
+    for i in range(n_red):
+        intensity = 0.5 + 0.5 * (i / max(n_red - 1, 1))  # 0.5 to 1.0
+        color_array.append([1.0, 0.0, 0.0, intensity])  # Pure red with varying alpha
+
+    cmap = ListedColormap(color_array, name="custom_ic")
+    cmap.set_under("black")  # Values < vmin
+    cmap.set_over("black")  # Values > vmax
+    cmap.set_bad("black")  # NaN values
+
+    return cmap, vmin, vmax
+
+
 def trace(message: str, level: int = logging.INFO):
     """Emit a verbose message if VERBOSE mode is enabled.
 
@@ -57,12 +134,13 @@ from utils import setup_experiment
 # =============================================================================
 
 # Base configuration
-RES_DIR = Path(base_path / "res" / "test_images")  # Base results directory
-REGION = "ijsselmeerdijk"  # Region name for experiment folder and the data subfolder
-EXP_NAME = "exp_2"
+RES_DIR = Path(base_path / "res")  # Base results directory
+REGION = "south"  # Region name for experiment folder and the data subfolder
+EXP_NAME = "exp_12"
 DESCRIPTION = (
     "Using the top fill with zeros method for equalizing CPT tops,"
     "new padding ideas,"
+    "new color scale for IC visualization,"
     "CPT compression to 32,"
     "3 CPT overlap,"
     "50% vertical overlap,"
@@ -72,7 +150,9 @@ DESCRIPTION = (
 )
 
 # Input data paths
-CPT_FOLDER = Path(base_path / "data" / "cpts" / REGION)  # Folder with .gef CPT files
+CPT_FOLDER = Path(
+    base_path / "data" / "cpts" / "betuwepand" / "dike_south_BRO"
+)  # Folder with .gef CPT files
 # CPT_FOLDER = Path(r"C:\VOW\data\cpts\waalbandijk")  # For quick testing with fewer CPTs
 SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")
 
@@ -567,16 +647,31 @@ def run_schema_generation(
             # Create and save PNG
             output_png = gan_images_folder / f"{section_file.stem}_seed{seed}_gan.png"
 
+            # Set up custom colormap
+            cmap, vmin, vmax = create_custom_ic_colormap()
+
             plt.figure(figsize=(10, 2.4))
             plt.imshow(
                 gan_result,
-                cmap="viridis",
-                vmin=0,
-                vmax=4.5,
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
                 aspect="auto",
                 extent=[x0, x1, SIZE_Y - 1, 0],
             )
-            plt.colorbar(label="Value")
+            cbar = plt.colorbar(label="IC Value", extend="both")
+            # Set custom ticks at color transition boundaries
+            cbar.set_ticks(
+                [IC_MIN, IC_YELLOW_ORANGE_BOUNDARY, IC_ORANGE_RED_BOUNDARY, IC_MAX]
+            )
+            cbar.set_ticklabels(
+                [
+                    f"{IC_MIN:g}",
+                    f"{IC_YELLOW_ORANGE_BOUNDARY:g}",
+                    f"{IC_ORANGE_RED_BOUNDARY:g}",
+                    f"{IC_MAX:g}",
+                ]
+            )
 
             ax = plt.gca()
             ax.set_xlabel("Distance along line (m)")
@@ -902,11 +997,17 @@ def run_mosaic_creation(
         vmin_val, vmax_val = None, None
         cmap_val = "hot"
         colorbar_label = "Uncertainty (Std Dev)"
+        ic_boundaries = None
     else:
-        # For GAN/enhanced: fixed scale for IC values
-        vmin_val, vmax_val = 0, 4.5
-        cmap_val = "viridis"
+        # For GAN/enhanced: custom IC scale with black for out-of-range
+        cmap_val, vmin_val, vmax_val = create_custom_ic_colormap()
         colorbar_label = "IC Value"
+        ic_boundaries = (
+            IC_MIN,
+            IC_YELLOW_ORANGE_BOUNDARY,
+            IC_ORANGE_RED_BOUNDARY,
+            IC_MAX,
+        )
 
     try:
         plot_mosaic(
@@ -922,6 +1023,7 @@ def run_mosaic_creation(
             vmax=vmax_val,
             cmap=cmap_val,
             colorbar_label=colorbar_label,
+            ic_boundaries=ic_boundaries,
         )
     except Exception as e:
         logger.error(f"Failed to plot mosaic: {e}")
