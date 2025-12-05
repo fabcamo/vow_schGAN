@@ -129,21 +129,23 @@ def choose_global_grid(manifest, coords):
     Compute the global horizontal range (meters) and pixel size.
     The mosaic will use a uniform GLOBAL_DX in meters per pixel.
 
-    Uses actual CPT positions (not padded section bounds) to determine extent,
-    so the mosaic doesn't extend beyond real data with artificial padding.
+    Uses section bounds (including padding) to determine extent,
+    ensuring all section data fits within the global grid.
     """
-    # Use actual CPT positions to determine the true data extent
-    xmin = float(coords["cum_along_m"].min())
-    xmax = float(coords["cum_along_m"].max())
+    # Compute the leftmost and rightmost positions from section bounds (including padding)
+    # Each section spans from x0 to x1, where x0 includes left padding
+    xmin = float(manifest["x0"].min())
+    xmax = float(manifest["x1"].max())
 
     # Use median section dx if not provided
     dx = GLOBAL_DX if GLOBAL_DX is not None else float(np.median(manifest["dx"]))
     width = int(round((xmax - xmin) / dx)) + 1
 
     print(
-        f"[INFO] Global grid based on actual CPT positions: "
+        f"[INFO] Global grid based on section bounds (with padding): "
         f"{xmin:.2f}..{xmax:.2f} m (span: {xmax - xmin:.2f} m)"
     )
+    print(f"[INFO] Global dx: {dx:.4f} m/px, width: {width} px")
 
     return xmin, xmax, dx, width
 
@@ -191,7 +193,21 @@ def add_section_to_accumulator(
     # Keep columns that fall inside mosaic width
     width = wts.shape[1]
     valid = (k0 >= 0) & (k0 < width)
+
+    # Count how many pixels are out of bounds for diagnostics
+    n_out_of_bounds = np.sum(~valid)
+    if n_out_of_bounds > 0:
+        print(
+            f"[WARN] {section_csv.name}: {n_out_of_bounds}/{len(k0)} pixels fall outside global grid"
+        )
+        print(
+            f"       Section range: {xj[0]:.2f}..{xj[-1]:.2f} m, Global range: {xmin:.2f}..{xmin + width*global_dx:.2f} m"
+        )
+
     if not np.any(valid):
+        print(
+            f"[ERROR] {section_csv.name}: ALL pixels outside global grid! Section will be missing from mosaic."
+        )
         return
 
     k0v = k0[valid]
@@ -306,7 +322,10 @@ def build_mosaic(manifest, coords):
     # Weighted average (per pixel)
     eps = 1e-12
     mosaic = acc / np.maximum(wts, eps)
-    return mosaic, xmin, xmax, global_dx, n_rows_total
+
+    # Return actual mosaic extent based on pixel dimensions, not theoretical xmax
+    actual_xmax = xmin + (width - 1) * global_dx
+    return mosaic, xmin, actual_xmax, global_dx, n_rows_total
 
 
 # =============================================================================
@@ -350,20 +369,28 @@ def plot_mosaic(
     height = np.clip(base_width * (vert_m / max(horiz_m, 1e-12)), 2, 12)
 
     fig, ax = plt.subplots(figsize=(base_width, height))
+
+    # For imshow with extent, pixel centers are placed at coordinate positions
+    # To make pixels fill the entire extent, we need to shift by half a pixel
+    # Pixel edges: xmin - dx/2 to xmax + dx/2
+    # Vertical: -0.5 to n_rows_total - 0.5 (so pixels 0...n_rows_total-1 fill the space)
     im = ax.imshow(
         mosaic,
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
         aspect="auto",
-        extent=[xmin, xmax, n_rows_total - 1, 0],
+        extent=[xmin - global_dx / 2, xmax + global_dx / 2, n_rows_total - 0.5, -0.5],
     )
     plt.colorbar(im, label=colorbar_label)
 
     # Add vertical lines at CPT positions if enabled and coords provided
+    # Only show CPTs that are within the mosaic extent
     if show_cpt_locations and coords is not None and "cum_along_m" in coords.columns:
         for cpt_x in coords["cum_along_m"]:
-            ax.axvline(x=cpt_x, color="black", linewidth=1, alpha=0.5, zorder=10)
+            # Only draw CPT line if it's within the mosaic extent
+            if xmin <= cpt_x <= xmax:
+                ax.axvline(x=cpt_x, color="black", linewidth=1, alpha=0.5, zorder=10)
 
     ax.set_xlabel("Distance along line (m)")
     ax.set_ylabel("Depth Index (global)")

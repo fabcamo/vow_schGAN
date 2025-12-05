@@ -112,13 +112,14 @@ def equalize_top(data_cpts: list[dict]) -> list[dict]:
     Returns:
         list: List of dictionaries with equalized CPT data.
     """
-    # Make a copy of the original data to keep it unchanged
+    # Empty list to store equalized CPT data
     equalized_cpts = []
 
     # Find the lowest maximum depth across all CPTs
-    lowest_max_depth = min(cpt["depth_max"] for cpt in data_cpts)
+    # This is the "lowest top" or "lowest upper part of the CPT" depth to equalize to
+    lowest_top_depth = min(cpt["depth_max"] for cpt in data_cpts)
     # Log a message for the depth used for equalization
-    logger.info(f"Equalizing to the lowest maximum depth of {lowest_max_depth} m")
+    logger.info(f"Equalizing to the lowest maximum depth of {lowest_top_depth} m")
 
     # Equalize the depth and IC data for each CPT
     for cpt in data_cpts:
@@ -130,7 +131,7 @@ def equalize_top(data_cpts: list[dict]) -> list[dict]:
 
         # Filter depth and IC values that are below the lowest maximum depth (strictly below)
         filtered_data = [
-            (d, ic) for d, ic in zip(depth, IC) if d < lowest_max_depth
+            (d, ic) for d, ic in zip(depth, IC) if d < lowest_top_depth
         ]  # Adjusted to < instead of <=
 
         # Separate filtered depth and IC values
@@ -146,6 +147,82 @@ def equalize_top(data_cpts: list[dict]) -> list[dict]:
         equalized_cpts.append(equalized_cpt)
 
     return equalized_cpts
+
+
+def fill_top_with_zeros(data_cpts: list[dict]) -> list[dict]:
+    """
+    Fill the top of all CPTs with zeros to match the highest starting point (shallowest depth_max).
+
+    CPTs that start deeper will have their top filled with zero IC values until they reach
+    the reference depth (highest/shallowest starting point among all CPTs).
+
+    Params:
+        data_cpts (list): List of dictionaries containing CPT data.
+
+    Returns:
+        list: List of dictionaries with zero-filled CPT data.
+    """
+    # Empty list to store filled CPT data
+    filled_cpts = []
+
+    # Find the highest starting point (shallowest/minimum depth_max) across all CPTs
+    # This is the reference depth that all CPTs should start from
+    highest_top_depth = max(cpt["depth_max"] for cpt in data_cpts)
+
+    # Log a message for the depth used for filling
+    logger.info(
+        f"Filling tops to match the highest starting depth of {highest_top_depth} m"
+    )
+
+    # Fill the top of each CPT with zeros if needed
+    for cpt in data_cpts:
+        # Create a new dictionary to store the filled data
+        filled_cpt = cpt.copy()
+
+        depth = list(filled_cpt["depth"])
+        IC = list(filled_cpt["IC"])
+
+        current_top = filled_cpt["depth_max"]
+
+        # If this CPT starts deeper than the reference, fill the gap with zeros
+        if current_top < highest_top_depth:
+            # Calculate how many zero entries we need to add
+            # We'll add entries from the reference depth down to the current top
+            # Using the same depth resolution as the existing data
+            if len(depth) > 1:
+                # Estimate depth increment from existing data
+                depth_increment = abs(depth[1] - depth[0]) if len(depth) > 1 else 0.01
+            else:
+                print(
+                    "Warning: CPT has only one depth value; using default increment of 0.01 m"
+                )
+                depth_increment = (
+                    0.02  # Default increment if only one depth value exists
+                )
+
+            # Create fill depths from highest_top_depth down to current_top
+            fill_depths = []
+            current_fill_depth = highest_top_depth
+            while current_fill_depth > current_top:
+                fill_depths.append(current_fill_depth)
+                current_fill_depth -= depth_increment
+
+            # Prepend the fill depths and zeros to the existing data
+            filled_cpt["depth"] = tuple(fill_depths + depth)
+            filled_cpt["IC"] = tuple([0] * len(fill_depths) + IC)
+
+            # Update depth_max to the new reference
+            filled_cpt["depth_max"] = highest_top_depth
+            # depth_min remains the same
+        else:
+            # No filling needed, convert to tuples if they aren't already
+            filled_cpt["depth"] = tuple(depth)
+            filled_cpt["IC"] = tuple(IC)
+
+        # Append the filled data to the new list
+        filled_cpts.append(filled_cpt)
+
+    return filled_cpts
 
 
 def equalize_depth(data_cpts, lowest_min_depth):
@@ -472,7 +549,7 @@ if __name__ == "__main__":
     #### USER INPUT ####
     CPT_FOLDER = Path(r"C:\VOW\data\cpts\betuwepand\dike_north_BRO")
     OUT_FOLDER = Path(r"C:\VOW\data\schgan_inputs\testtestest")
-    OUT_NAME = "test_dike_north_input_new.csv"
+    OUT_NAME = "top_with_zeros.csv"
     ####################
 
     # Directory containing the CPT files
@@ -497,7 +574,7 @@ if __name__ == "__main__":
     logger.info(f"The lowest minimum depth is: {lowest_min_depth}")
 
     # Equalize depths to match the lowest_max_depth (equalized top)
-    equalized_top_cpts = equalize_top(original_data_cpts)
+    equalized_top_cpts = fill_top_with_zeros(original_data_cpts)
 
     # Now extend depths to match the lowest_min_depth (equalized bottom)
     equalized_depth_cpts = equalize_depth(equalized_top_cpts, lowest_min_depth)

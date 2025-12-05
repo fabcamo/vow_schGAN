@@ -26,3 +26,14 @@ Thumbs.db
 *.egg-info/
 dist/
 build/
+
+analyze_mosaic_extent.py
+check_cpt_indices.py
+check_gan_file.py
+check_gan_file2.py
+check_mosaic.py
+check_mosaic_header.py
+diagnose_sections.py
+full_mosaic_debug.py
+test_plot_alignment.py
+visualize_mosaic.py

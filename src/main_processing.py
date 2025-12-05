@@ -43,8 +43,12 @@ def trace(message: str, level: int = logging.INFO):
         logger.log(level, message)
 
 
+base_path = Path(r"C:\VOW")  # Base path for experiments
+# base_path = Path(r"N:\Projects\11211500\11211566\B. Measurements and calculations\007 - Remote sensing AI")
+
 # Add GEOLib-Plus path
 sys.path.append(r"D:\GEOLib-Plus")
+
 
 from utils import setup_experiment
 
@@ -53,27 +57,30 @@ from utils import setup_experiment
 # =============================================================================
 
 # Base configuration
-RES_DIR = Path(r"C:\VOW\res")
-REGION = "south"
-EXP_NAME = "exp_8"
+RES_DIR = Path(base_path / "res" / "test_images")  # Base results directory
+REGION = "ijsselmeerdijk"  # Region name for experiment folder and the data subfolder
+EXP_NAME = "exp_2"
 DESCRIPTION = (
-    "CPT compression to 64,"
+    "Using the top fill with zeros method for equalizing CPT tops,"
+    "new padding ideas,"
+    "CPT compression to 32,"
     "3 CPT overlap,"
     "50% vertical overlap,"
     "10% padding,"
     "Added boundary enhancement,"
-    "Added uncertainty quantification,"
+    "Added uncertainty quantification with 10 samples,"
 )
 
 # Input data paths
-CPT_FOLDER = Path(r"C:\VOW\data\cpts\betuwepand\dike_south_BRO")
+CPT_FOLDER = Path(base_path / "data" / "cpts" / REGION)  # Folder with .gef CPT files
+# CPT_FOLDER = Path(r"C:\VOW\data\cpts\waalbandijk")  # For quick testing with fewer CPTs
 SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")
 
 # Processing parameters
 COMPRESSION_METHOD = "mean"  # "mean" or "max" for IC value compression
 
 # CPT Data Compression - can be different from model input size
-CPT_DEPTH_PIXELS = 64  # Number of depth levels to compress raw CPT data to
+CPT_DEPTH_PIXELS = 32  # Number of depth levels to compress raw CPT data to
 # Can be 32, 64, 128, etc. independent of N_ROWS
 # Higher values preserve more detail from raw CPT data
 
@@ -103,14 +110,20 @@ ENHANCE_METHOD = "none"  # Enhancement method to sharpen layer boundaries
 # Uncertainty Quantification (Monte Carlo Dropout)
 COMPUTE_UNCERTAINTY = True  # Compute prediction uncertainty using MC Dropout
 N_MC_SAMPLES = (
-    50  # Number of MC Dropout samples (20-100 typical, more = slower but more accurate)
+    10  # Number of MC Dropout samples (20-100 typical, more = slower but more accurate)
 )
 # MC Dropout reveals where the GAN is uncertain in its predictions:
 #   - High uncertainty: complex transitions, far from data, ambiguous interpolations
 #   - Low uncertainty: near CPT locations, homogeneous layers, clear patterns
 
-LEFT_PAD_FRACTION = 0.1  # Left padding as fraction of section span
-RIGHT_PAD_FRACTION = 0.1  # Right padding as fraction of section span
+# Padding strategy: Use percentage of section span
+LEFT_PAD_FRACTION = 0.1  # Left padding as fraction of section span (10%)
+RIGHT_PAD_FRACTION = 0.1  # Right padding as fraction of section span (10%)
+# Note: Padding is calculated per section based on its span, so:
+#   - Small section (100m) → 10m padding on each side
+#   - Large section (300m) → 30m padding on each side
+# This keeps padding proportional to section size
+
 DIR_FROM, DIR_TO = "west", "east"  # Sorting direction
 
 # Optional: Real depth range for visualization (will be computed if None)
@@ -185,6 +198,7 @@ def run_cpt_data_processing(
     from extract_data import (
         process_cpts,
         equalize_top,
+        fill_top_with_zeros,
         equalize_depth,
         compress_cpt_data,
         save_cpt_to_csv,
@@ -206,7 +220,8 @@ def run_cpt_data_processing(
     logger.info(f"Depth range: {lowest_max_depth:.3f} to {lowest_min_depth:.3f} m")
 
     # Process data
-    equalized_top_cpts = equalize_top(original_data_cpts)
+    # equalized_top_cpts = equalize_top(original_data_cpts)
+    equalized_top_cpts = fill_top_with_zeros(original_data_cpts)
     equalized_depth_cpts = equalize_depth(equalized_top_cpts, lowest_min_depth)
     compressed_cpts = compress_cpt_data(
         equalized_depth_cpts, method=compression_method, n_pixels=cpt_depth_pixels

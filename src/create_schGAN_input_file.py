@@ -204,7 +204,11 @@ def section_starts(n: int, per: int, overlap: int) -> List[int]:
 
 
 def map_dist_to_cols(
-    dists_rel: np.ndarray, left_pad_frac: float, right_pad_frac: float, n_cols: int
+    dists_rel: np.ndarray,
+    left_pad_frac: float,
+    right_pad_frac: float,
+    n_cols: int,
+    min_pad_m: float = 0.0,
 ) -> Tuple[np.ndarray, float, float, float]:
     """Map relative distances (per section) to integer columns with padding.
 
@@ -213,6 +217,7 @@ def map_dist_to_cols(
         left_pad_frac: Fraction of span to pad on the left.
         right_pad_frac: Fraction of span to pad on the right.
         n_cols: Number of columns in the target grid.
+        min_pad_m: Minimum absolute padding in meters (overrides fraction if needed).
 
     Returns:
         Tuple:
@@ -223,8 +228,10 @@ def map_dist_to_cols(
     """
     # Avoid divide-by-zero: ensure minimum span
     span = float(max(1e-9, float(dists_rel.max())))
-    left_pad = left_pad_frac * span
-    right_pad = right_pad_frac * span
+
+    # Calculate padding as percentage, but enforce minimum absolute value
+    left_pad = max(left_pad_frac * span, min_pad_m)
+    right_pad = max(right_pad_frac * span, min_pad_m)
     total_span = span + left_pad + right_pad
 
     # Normalize each distance within [0, 1] across padded span, then scale to columns
