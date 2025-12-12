@@ -747,36 +747,40 @@ def save_validation_results(
     for run_idx, mae_dict in enumerate(all_mae_results, 1):
         row = {"Run_no": run_idx}
         row.update(mae_dict)
-        row["Mean_MAE_of_run"] = np.mean(list(mae_dict.values()))
-        row["Std_MAE_of_run"] = np.std(list(mae_dict.values()), ddof=1)
         mae_rows.append(row)
 
     df_mae = pd.DataFrame(mae_rows)
+    
+    # Calculate mean and std for each run (across CPTs) and add as last columns
+    cpt_columns = [col for col in df_mae.columns if col != "Run_no"]
+    df_mae["Mean_MAE_of_run"] = df_mae[cpt_columns].mean(axis=1)
+    df_mae["Std_MAE_of_run"] = df_mae[cpt_columns].std(axis=1, ddof=1)
 
     # Calculate per-CPT statistics across all runs
-    cpt_columns = [
-        col
-        for col in df_mae.columns
-        if col not in ["Run_no", "Mean_MAE_of_run", "Std_MAE_of_run"]
-    ]
-    stats_row_mae = {"Run_no": "STATISTICS"}
+    mean_row_mae = {"Run_no": "MEAN"}
+    std_row_mae = {"Run_no": "STD"}
+    
     for cpt in cpt_columns:
         values = df_mae[cpt].dropna()
         if len(values) > 0:
-            stats_row_mae[cpt] = f"{np.mean(values):.4f} ± {np.std(values, ddof=1):.4f}"
+            mean_row_mae[cpt] = np.mean(values)
+            std_row_mae[cpt] = np.std(values, ddof=1)
         else:
-            stats_row_mae[cpt] = "N/A"
+            mean_row_mae[cpt] = np.nan
+            std_row_mae[cpt] = np.nan
 
     # Overall statistics across all CPTs and runs
     all_mae_values = df_mae[cpt_columns].values.flatten()
     all_mae_values = all_mae_values[~np.isnan(all_mae_values)]
-    stats_row_mae["Mean_MAE_of_run"] = (
-        f"{np.mean(all_mae_values):.4f} ± {np.std(all_mae_values, ddof=1):.4f}"
-    )
-    stats_row_mae["Std_MAE_of_run"] = ""
+    mean_row_mae["Mean_MAE_of_run"] = np.mean(all_mae_values)
+    mean_row_mae["Std_MAE_of_run"] = np.std(all_mae_values, ddof=1)
+    
+    # For STD row, show std of the per-run means and stds
+    std_row_mae["Mean_MAE_of_run"] = np.std(df_mae["Mean_MAE_of_run"].dropna(), ddof=1)
+    std_row_mae["Std_MAE_of_run"] = np.std(df_mae["Std_MAE_of_run"].dropna(), ddof=1)
 
-    # Add statistics row
-    df_mae = pd.concat([df_mae, pd.DataFrame([stats_row_mae])], ignore_index=True)
+    # Add statistics rows
+    df_mae = pd.concat([df_mae, pd.DataFrame([mean_row_mae, std_row_mae])], ignore_index=True)
 
     mae_csv = output_folder / "validation_mae_results.csv"
     df_mae.to_csv(mae_csv, index=False)
@@ -787,18 +791,45 @@ def save_validation_results(
     for run_idx, mse_dict in enumerate(all_mse_results, 1):
         row = {"Run_no": run_idx}
         row.update(mse_dict)
-        row["Mean_MSE_of_run"] = np.mean(list(mse_dict.values()))
-        row["Std_MSE_of_run"] = np.std(list(mse_dict.values()), ddof=1)
         mse_rows.append(row)
 
     df_mse = pd.DataFrame(mse_rows)
+    
+    # Calculate mean and std for each run (across CPTs) and add as last columns
+    cpt_columns = [col for col in df_mse.columns if col != "Run_no"]
+    df_mse["Mean_MSE_of_run"] = df_mse[cpt_columns].mean(axis=1)
+    df_mse["Std_MSE_of_run"] = df_mse[cpt_columns].std(axis=1, ddof=1)
 
     # Calculate per-CPT statistics across all runs
-    cpt_columns = [
-        col
-        for col in df_mse.columns
-        if col not in ["Run_no", "Mean_MSE_of_run", "Std_MSE_of_run"]
-    ]
+    mean_row_mse = {"Run_no": "MEAN"}
+    std_row_mse = {"Run_no": "STD"}
+    
+    for cpt in cpt_columns:
+        values = df_mse[cpt].dropna()
+        if len(values) > 0:
+            mean_row_mse[cpt] = np.mean(values)
+            std_row_mse[cpt] = np.std(values, ddof=1)
+        else:
+            mean_row_mse[cpt] = np.nan
+            std_row_mse[cpt] = np.nan
+
+    # Overall statistics across all CPTs and runs
+    all_mse_values = df_mse[cpt_columns].values.flatten()
+    all_mse_values = all_mse_values[~np.isnan(all_mse_values)]
+    mean_row_mse["Mean_MSE_of_run"] = np.mean(all_mse_values)
+    mean_row_mse["Std_MSE_of_run"] = np.std(all_mse_values, ddof=1)
+    
+    # For STD row, show std of the per-run means and stds
+    std_row_mse["Mean_MSE_of_run"] = np.std(df_mse["Mean_MSE_of_run"].dropna(), ddof=1)
+    std_row_mse["Std_MSE_of_run"] = np.std(df_mse["Std_MSE_of_run"].dropna(), ddof=1)
+
+    # Add statistics rows
+    df_mse = pd.concat([df_mse, pd.DataFrame([mean_row_mse, std_row_mse])], ignore_index=True)
+
+    mse_csv = output_folder / "validation_mse_results.csv"
+    df_mse.to_csv(mse_csv, index=False)
+    print(f"✓ Saved MSE results to: {mse_csv}")
+    
     stats_row_mse = {"Run_no": "STATISTICS"}
     for cpt in cpt_columns:
         values = df_mse[cpt].dropna()
