@@ -186,6 +186,13 @@ def add_section_to_accumulator(
     # Compute global positions (in meters)
     xj = x0 + np.arange(N_COLS) * dx
     pos = (xj - xmin) / global_dx
+
+    # Use linear interpolation to properly resample sections onto the global grid
+    # This is necessary because different sections have slightly different pixel sizes (dx)
+    # due to varying CPT spacing and padding. Linear interpolation ensures:
+    # 1. No pixels are lost or duplicated
+    # 2. Values are preserved in non-overlapping regions (weight = 1.0)
+    # 3. Overlapping sections are smoothly blended
     k0 = np.floor(pos).astype(int)
     frac = pos - k0
     k1 = k0 + 1
@@ -193,16 +200,6 @@ def add_section_to_accumulator(
     # Keep columns that fall inside mosaic width
     width = wts.shape[1]
     valid = (k0 >= 0) & (k0 < width)
-
-    # Count how many pixels are out of bounds for diagnostics
-    n_out_of_bounds = np.sum(~valid)
-    if n_out_of_bounds > 0:
-        print(
-            f"[WARN] {section_csv.name}: {n_out_of_bounds}/{len(k0)} pixels fall outside global grid"
-        )
-        print(
-            f"       Section range: {xj[0]:.2f}..{xj[-1]:.2f} m, Global range: {xmin:.2f}..{xmin + width*global_dx:.2f} m"
-        )
 
     if not np.any(valid):
         print(
@@ -218,13 +215,38 @@ def add_section_to_accumulator(
     rows_slice = slice(y_offset, y_offset + N_ROWS_WINDOW)
 
     # Add weighted contributions to accumulator and weights (per pixel)
-    acc[rows_slice, k0v] += arr[:, valid] * f0
-    wts[rows_slice, k0v] += f0  # broadcast f0 over all rows in this window
+    # For pixels where frac is very small (< 1%), treat as exact match to avoid unnecessary blending
+    exact_match = f1 < 0.01  # frac < 0.01, so pixel aligns closely with k0
+    near_next = f0 < 0.01  # frac > 0.99, so pixel aligns closely with k1
 
-    in_range = k1v < width
-    if np.any(in_range):
-        acc[rows_slice, k1v[in_range]] += arr[:, valid][:, in_range] * f1[in_range]
-        wts[rows_slice, k1v[in_range]] += f1[in_range]
+    # For exact matches to k0, only contribute to k0
+    if np.any(exact_match):
+        acc[rows_slice, k0v[exact_match]] += arr[:, valid][:, exact_match]
+        wts[rows_slice, k0v[exact_match]] += 1.0
+
+    # For exact matches to k1, only contribute to k1
+    if np.any(near_next):
+        k1_valid = k1v[near_next] < width
+        if np.any(k1_valid):
+            k1_idx = k1v[near_next][k1_valid]
+            acc[rows_slice, k1_idx] += arr[:, valid][:, near_next][:, k1_valid]
+            wts[rows_slice, k1_idx] += 1.0
+
+    # For pixels in between, use linear interpolation
+    needs_interp = ~exact_match & ~near_next
+    if np.any(needs_interp):
+        acc[rows_slice, k0v[needs_interp]] += (
+            arr[:, valid][:, needs_interp] * f0[needs_interp]
+        )
+        wts[rows_slice, k0v[needs_interp]] += f0[needs_interp]
+
+        in_range = k1v[needs_interp] < width
+        if np.any(in_range):
+            k1_idx = k1v[needs_interp][in_range]
+            acc[rows_slice, k1_idx] += (
+                arr[:, valid][:, needs_interp][:, in_range] * f1[needs_interp][in_range]
+            )
+            wts[rows_slice, k1_idx] += f1[needs_interp][in_range]
 
 
 # =============================================================================

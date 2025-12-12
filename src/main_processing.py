@@ -136,9 +136,9 @@ from utils import setup_experiment
 # Base configuration
 RES_DIR = Path(base_path / "res")  # Base results directory
 REGION = "south"  # Region name for experiment folder and the data subfolder
-EXP_NAME = "exp_12"
+EXP_NAME = "exp_14"
 DESCRIPTION = (
-    "Using the top fill with zeros method for equalizing CPT tops,"
+    "Testing if everything works back to normal??? after trying the elevation from AHN,"
     "new padding ideas,"
     "new color scale for IC visualization,"
     "CPT compression to 32,"
@@ -160,7 +160,7 @@ SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")
 COMPRESSION_METHOD = "mean"  # "mean" or "max" for IC value compression
 
 # CPT Data Compression - can be different from model input size
-CPT_DEPTH_PIXELS = 32  # Number of depth levels to compress raw CPT data to
+CPT_DEPTH_PIXELS = 64  # Number of depth levels to compress raw CPT data to
 # Can be 32, 64, 128, etc. independent of N_ROWS
 # Higher values preserve more detail from raw CPT data
 
@@ -170,7 +170,7 @@ N_ROWS = 32  # Number of rows in sections (SchemaGAN expects 32)
 # If CPT_DEPTH_PIXELS != N_ROWS, resampling will occur in section creation
 
 CPTS_PER_SECTION = 6  # Number of CPTs per section
-OVERLAP_CPTS = 3  # Number of overlapping CPTs between sections (horizontal)
+OVERLAP_CPTS = 2  # Number of overlapping CPTs between sections (horizontal)
 
 # Vertical windowing parameters
 VERTICAL_OVERLAP = 50  # [%] Vertical overlap between depth windows (0.0 = no overlap, 50.0 = 50% overlap)
@@ -1266,6 +1266,18 @@ def main():
             f"[DEBUG] CPT processing complete. y_top_final={y_top_final}, y_bottom_final={y_bottom_final}"
         )
         logger.info(f"[DEBUG] Compressed CSV: {compressed_csv}")
+
+        # Save depth range for validation and other downstream tasks
+        import json
+
+        depth_range_file = folders["root"] / "depth_range.json"
+        with open(depth_range_file, "w") as f:
+            json.dump(
+                {"y_top_m": float(y_top_final), "y_bottom_m": float(y_bottom_final)},
+                f,
+                indent=2,
+            )
+        logger.info(f"[DEBUG] Depth range saved to: {depth_range_file}")
 
     except Exception as e:
         logger.error(f"Failed to process CPT data: {e}")
