@@ -102,6 +102,11 @@ def main():
     logger.info("=" * 60)
     logger.info(f"Experiment folders created at: {folders['root']}")
 
+    # Initialize variables that may not be set if steps are skipped
+    manifest = None
+    y_top_final = None
+    y_bottom_final = None
+
     # =============================================================================
     # 2. EXTRACT COORDINATES FROM CPT FILES
     # =============================================================================
@@ -159,7 +164,9 @@ def main():
     else:
         logger.info("=" * 60)
         logger.info("Step 2: Skipped (RUN_STEP_2_PREPARE_CPTS = False)")
-        compressed_csv = folders["2_compressed_cpt"] / "cpt_data_compressed.csv"
+        # Use the actual filename format that is created by cpt_processing
+        compressed_filename = f"compressed_cpt_data_{config.COMPRESSION_METHOD}_{config.CPT_DEPTH_PIXELS}px.csv"
+        compressed_csv = folders["2_compressed_cpt"] / compressed_filename
         # Load depth range from previous run if available
         depth_range_file = folders["root"] / "depth_range.json"
         if depth_range_file.exists():
@@ -345,7 +352,9 @@ def main():
 
         try:
             # Check if uncertainty files exist
-            uncertainty_files = list(folders["7_model_uncert"].glob("*_uncertainty.csv"))
+            uncertainty_files = list(
+                folders["7_model_uncert"].glob("*_uncertainty.csv")
+            )
 
             if len(uncertainty_files) == 0:
                 logger.warning("No uncertainty files found.")
@@ -394,6 +403,31 @@ def main():
             )
 
     # =============================================================================
+    # 9. RUN VALIDATION (OPTIONAL)
+    # =============================================================================
+    if config.RUN_STEP_8_VALIDATION:
+        logger.info("=" * 60)
+        logger.info("Step 8: Running validation with leave-out cross-validation...")
+
+        try:
+            from modules.validation import run_validation_pipeline
+
+            run_validation_pipeline(
+                folders=folders,
+                compressed_csv=compressed_csv,
+                y_top_m=y_top_final,
+                y_bottom_m=y_bottom_final,
+                n_runs=config.VALIDATION_N_RUNS,
+                n_remove=config.VALIDATION_N_REMOVE,
+                base_seed=config.VALIDATION_BASE_SEED,
+            )
+        except Exception as e:
+            logger.error(f"Failed to run validation: {e}")
+    else:
+        logger.info("=" * 60)
+        logger.info("Step 8: Skipped (RUN_STEP_8_VALIDATION = False)")
+
+    # =============================================================================
     # COMPLETION
     # =============================================================================
     logger.info("=" * 60)
@@ -407,8 +441,10 @@ def main():
 
     # Summary statistics
     logger.info("\nPipeline Summary:")
-    logger.info(f"  - Sections created: {len(manifest)}")
-    logger.info(f"  - Depth range: {y_top_final:.3f} to {y_bottom_final:.3f} m")
+    if manifest is not None:
+        logger.info(f"  - Sections created: {len(manifest)}")
+    if y_top_final is not None and y_bottom_final is not None:
+        logger.info(f"  - Depth range: {y_top_final:.3f} to {y_bottom_final:.3f} m")
     logger.info(f"  - Grid size: {config.N_ROWS} × {config.N_COLS} pixels")
     logger.info(
         f"  - Enhancement: {config.ENHANCE_METHOD if config.ENHANCE_METHOD else 'None'}"

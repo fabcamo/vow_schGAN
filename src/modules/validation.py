@@ -1,11 +1,10 @@
 """
-Validation script for VOW SchemaGAN using leave-out cross-validation strategy.
+Validation module for VOW SchemaGAN using leave-out cross-validation strategy.
 
-This script reuses the configuration and functions from main_processing.py to validate
-the SchemaGAN model by:
-1. Loading experiment configuration from main_processing.py
-2. Randomly removing 12 CPTs per run (following specific rules)
-3. Creating sections from remaining CPTs using existing pipeline
+This module validates the SchemaGAN model by:
+1. Loading experiment configuration from config.py
+2. Randomly removing N CPTs per run (configurable via VALIDATION_N_REMOVE)
+3. Creating sections from remaining CPTs using the preprocessing pipeline
 4. Generating SchemaGAN predictions for each section/window
 5. Extracting predictions at left-out CPT locations
 6. Comparing predictions against left-out CPTs
@@ -28,8 +27,8 @@ import logging
 import tempfile
 import shutil
 
-# Add parent directory to path for config import
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import config
 
 # Suppress TensorFlow warnings
@@ -40,8 +39,8 @@ from tensorflow.keras.models import load_model
 # Add GEOLib-Plus path if needed
 sys.path.append(r"D:\GEOLib-Plus")
 
-# Import from main_processing and other modules
-import main_processing as mp
+# Import from project modules
+from modules.visualization import create_custom_ic_colormap
 from core.utils import IC_normalization, reverse_IC_normalization
 from core.create_schGAN_input_file import (
     split_cpt_into_windows,
@@ -194,7 +193,7 @@ def run_validation(
 
     # IMPORTANT: Sort coordinates spatially first to get correct CPT order
     # This ensures we don't remove consecutive CPTs along the transect
-    from create_schGAN_input_file import sort_cpt_by_coordinates
+    from core.create_schGAN_input_file import sort_cpt_by_coordinates
 
     coords_df_full_sorted = sort_cpt_by_coordinates(
         coords_df=coords_df_full, from_where=dir_from, to_where=dir_to
@@ -236,7 +235,10 @@ def run_validation(
 
         # IMPORTANT: Create distance file for ALL CPTs (including removed ones)
         # This is needed to locate removed CPTs spatially in the sections
-        from create_schGAN_input_file import sort_cpt_by_coordinates, compute_distances
+        from core.create_schGAN_input_file import (
+            sort_cpt_by_coordinates,
+            compute_distances,
+        )
 
         coords_df_full_sorted = sort_cpt_by_coordinates(
             coords_df=coords_df_full, from_where=dir_from, to_where=dir_to
@@ -363,8 +365,15 @@ def run_validation(
                     x1 = start_m + total_span_m
                     dx = total_span_m / (n_cols - 1) if n_cols > 1 else total_span_m
 
-                    # Use custom colormap from main_processing
-                    cmap, vmin, vmax = mp.create_custom_ic_colormap()
+                    # Use custom colormap
+                    cmap, vmin, vmax = create_custom_ic_colormap(
+                        config.IC_MIN,
+                        config.IC_SAND_SANDMIX_BOUNDARY,
+                        config.IC_SANDMIX_SILTMIX_BOUNDARY,
+                        config.IC_SILTMIX_CLAY_BOUNDARY,
+                        config.IC_CLAY_ORGANIC_BOUNDARY,
+                        config.IC_MAX,
+                    )
 
                     plt.figure(figsize=(10, 2.4))
                     plt.imshow(
@@ -380,22 +389,22 @@ def run_validation(
                     cbar.set_label("IC Value", fontsize=config.PLOT_FONT_SIZE)
                     cbar.set_ticks(
                         [
-                            mp.IC_MIN,
-                            mp.IC_SAND_SANDMIX_BOUNDARY,
-                            mp.IC_SANDMIX_SILTMIX_BOUNDARY,
-                            mp.IC_SILTMIX_CLAY_BOUNDARY,
-                            mp.IC_CLAY_ORGANIC_BOUNDARY,
-                            mp.IC_MAX,
+                            config.IC_MIN,
+                            config.IC_SAND_SANDMIX_BOUNDARY,
+                            config.IC_SANDMIX_SILTMIX_BOUNDARY,
+                            config.IC_SILTMIX_CLAY_BOUNDARY,
+                            config.IC_CLAY_ORGANIC_BOUNDARY,
+                            config.IC_MAX,
                         ]
                     )
                     cbar.set_ticklabels(
                         [
-                            f"{mp.IC_MIN:g}",
-                            f"{mp.IC_SAND_SANDMIX_BOUNDARY:g}",
-                            f"{mp.IC_SANDMIX_SILTMIX_BOUNDARY:g}",
-                            f"{mp.IC_SILTMIX_CLAY_BOUNDARY:g}",
-                            f"{mp.IC_CLAY_ORGANIC_BOUNDARY:g}",
-                            f"{mp.IC_MAX:g}",
+                            f"{config.IC_MIN:g}",
+                            f"{config.IC_SAND_SANDMIX_BOUNDARY:g}",
+                            f"{config.IC_SANDMIX_SILTMIX_BOUNDARY:g}",
+                            f"{config.IC_SILTMIX_CLAY_BOUNDARY:g}",
+                            f"{config.IC_CLAY_ORGANIC_BOUNDARY:g}",
+                            f"{config.IC_MAX:g}",
                         ],
                         fontsize=config.PLOT_FONT_SIZE,
                     )
@@ -600,7 +609,7 @@ def create_validation_mosaic(
     removed_cpts: List[str] = None,
 ) -> None:
     """
-    Create a mosaic combining all generated sections into a single image.
+    Create a mosaic combining all validation sections into a single image.
 
     Parameters:
         manifest_csv: Path to manifest CSV with section information
@@ -613,9 +622,8 @@ def create_validation_mosaic(
         y_bottom_m: Bottom depth in meters
         removed_cpts: List of removed CPT names (for dashed line markers)
     """
-    import main_processing as mp
-    from create_mosaic import build_mosaic
-    import create_mosaic
+    from core import create_mosaic as mosaic_creation
+    from core.create_mosaic import build_mosaic
 
     print("  Creating mosaic from all sections...")
 
@@ -627,23 +635,22 @@ def create_validation_mosaic(
         print(f"    Failed to load manifest or coordinates: {e}")
         return
 
-    # Temporarily set create_mosaic module constants to match validation context
-    original_n_cols = create_mosaic.N_COLS
-    original_n_rows = create_mosaic.N_ROWS_WINDOW
-    original_y_top = create_mosaic.Y_TOP_M
-    original_y_bottom = create_mosaic.Y_BOTTOM_M
-    original_gan_dir = create_mosaic.GAN_DIR
+    # Temporarily patch mosaic_creation module constants to match validation context
+    # This is necessary because build_mosaic uses these module-level constants
+    original_n_cols = mosaic_creation.N_COLS
+    original_n_rows = mosaic_creation.N_ROWS_WINDOW
+    original_y_top = mosaic_creation.Y_TOP_M
+    original_y_bottom = mosaic_creation.Y_BOTTOM_M
+    original_gan_dir = mosaic_creation.GAN_DIR
 
-    create_mosaic.N_COLS = n_cols
-    create_mosaic.N_ROWS_WINDOW = n_rows
-    create_mosaic.Y_TOP_M = y_top_m
-    create_mosaic.Y_BOTTOM_M = y_bottom_m
-    create_mosaic.GAN_DIR = (
-        images_folder  # Point to temp folder with validation GAN files
-    )
+    mosaic_creation.N_COLS = n_cols
+    mosaic_creation.N_ROWS_WINDOW = n_rows
+    mosaic_creation.Y_TOP_M = y_top_m
+    mosaic_creation.Y_BOTTOM_M = y_bottom_m
+    mosaic_creation.GAN_DIR = images_folder  # Point to validation GAN files
 
     try:
-        # Use the exact same build_mosaic function as main_processing
+        # Use the build_mosaic function with validation manifest
         mosaic, xmin, xmax, global_dx, n_rows_total = build_mosaic(manifest, coords)
 
         # Save mosaic CSV
@@ -653,19 +660,26 @@ def create_validation_mosaic(
 
         # Save mosaic PNG with custom IC colormap
         mosaic_png = images_folder / "validation_mosaic.png"
-        cmap, vmin_val, vmax_val = mp.create_custom_ic_colormap()
+        cmap, vmin_val, vmax_val = create_custom_ic_colormap(
+            config.IC_MIN,
+            config.IC_SAND_SANDMIX_BOUNDARY,
+            config.IC_SANDMIX_SILTMIX_BOUNDARY,
+            config.IC_SILTMIX_CLAY_BOUNDARY,
+            config.IC_CLAY_ORGANIC_BOUNDARY,
+            config.IC_MAX,
+        )
         ic_boundaries = (
-            mp.IC_MIN,
-            mp.IC_SAND_SANDMIX_BOUNDARY,
-            mp.IC_SANDMIX_SILTMIX_BOUNDARY,
-            mp.IC_SILTMIX_CLAY_BOUNDARY,
-            mp.IC_CLAY_ORGANIC_BOUNDARY,
-            mp.IC_MAX,
+            config.IC_MIN,
+            config.IC_SAND_SANDMIX_BOUNDARY,
+            config.IC_SANDMIX_SILTMIX_BOUNDARY,
+            config.IC_SILTMIX_CLAY_BOUNDARY,
+            config.IC_CLAY_ORGANIC_BOUNDARY,
+            config.IC_MAX,
         )
 
         # Plot mosaic with CPT markers
         # Create custom plot to add both present and removed CPT markers
-        # Use dynamic figure size based on aspect ratio (same as main_processing)
+        # Use dynamic figure size based on aspect ratio
         horiz_m = xmax - xmin
         vert_m = abs(y_bottom_m - y_top_m)
         base_width = 16
@@ -695,9 +709,13 @@ def create_validation_mosaic(
         cbar.set_ticks(list(ic_boundaries))
         cbar.set_ticklabels([f"{val:g}" for val in ic_boundaries])
 
-        ax.set_xlabel("Distance along line (m)")
-        ax.set_ylabel("Depth Index (global)")
-        ax.set_title(f"Validation Mosaic (with {len(removed_cpts or [])} CPTs removed)")
+        ax.set_xlabel("Distance along line (m)", fontsize=config.PLOT_FONT_SIZE)
+        ax.set_ylabel("Depth Index (global)", fontsize=config.PLOT_FONT_SIZE)
+        ax.set_title(
+            f"Validation Mosaic (with {len(removed_cpts or [])} CPTs removed)",
+            fontsize=config.PLOT_FONT_SIZE,
+        )
+        ax.tick_params(axis="both", labelsize=config.PLOT_FONT_SIZE)
 
         # Add vertical lines at present CPT positions (solid black)
         for cpt_x in coords["cum_along_m"]:
@@ -738,7 +756,7 @@ def create_validation_mosaic(
 
         # Create interactive HTML viewer with proper axes
         try:
-            from utils import create_interactive_html
+            from core.utils import create_interactive_html
 
             mosaic_html = images_folder / "validation_mosaic.html"
             extent = (xmin, xmax, n_rows_total - 1, 0)
@@ -756,12 +774,12 @@ def create_validation_mosaic(
         print(f"    Mosaic PNG saved: {mosaic_png.name}")
 
     finally:
-        # Restore original values
-        create_mosaic.N_COLS = original_n_cols
-        create_mosaic.N_ROWS_WINDOW = original_n_rows
-        create_mosaic.Y_TOP_M = original_y_top
-        create_mosaic.Y_BOTTOM_M = original_y_bottom
-        create_mosaic.GAN_DIR = original_gan_dir
+        # Restore original module constants
+        mosaic_creation.N_COLS = original_n_cols
+        mosaic_creation.N_ROWS_WINDOW = original_n_rows
+        mosaic_creation.Y_TOP_M = original_y_top
+        mosaic_creation.Y_BOTTOM_M = original_y_bottom
+        mosaic_creation.GAN_DIR = original_gan_dir
 
 
 def save_validation_results(
@@ -869,208 +887,152 @@ def save_validation_results(
     df_mse.to_csv(mse_csv, index=False)
     print(f"✓ Saved MSE results to: {mse_csv}")
 
-    stats_row_mse = {"Run_no": "STATISTICS"}
-    for cpt in cpt_columns:
-        values = df_mse[cpt].dropna()
-        if len(values) > 0:
-            stats_row_mse[cpt] = f"{np.mean(values):.4f} ± {np.std(values, ddof=1):.4f}"
-        else:
-            stats_row_mse[cpt] = "N/A"
 
-    # Overall statistics across all CPTs and runs
-    all_mse_values = df_mse[cpt_columns].values.flatten()
-    all_mse_values = all_mse_values[~np.isnan(all_mse_values)]
-    stats_row_mse["Mean_MSE_of_run"] = (
-        f"{np.mean(all_mse_values):.4f} ± {np.std(all_mse_values, ddof=1):.4f}"
-    )
-    stats_row_mse["Std_MSE_of_run"] = ""
+def run_validation_pipeline(
+    folders: dict,
+    compressed_csv: Path,
+    y_top_m: float,
+    y_bottom_m: float,
+    n_runs: int = 10,
+    n_remove: int = 12,
+    base_seed: int = None,
+):
+    """
+    Run the validation pipeline with leave-out cross-validation.
 
-    # Add statistics row
-    df_mse = pd.concat([df_mse, pd.DataFrame([stats_row_mse])], ignore_index=True)
-
-    mse_csv = output_folder / "validation_mse_results.csv"
-    df_mse.to_csv(mse_csv, index=False)
-    print(f"✓ Saved MSE results to: {mse_csv}")
-
-
-# Visualization removed - validation uses proper sectioning pipeline
-# Results are computed directly during section generation
-
-
-# =============================================================================
-# CONFIGURATION - Reused from main_processing.py
-# =============================================================================
-
-if __name__ == "__main__":
-    # Import configuration from main_processing.py
-    BASE_PATH = mp.base_path
-    RES_DIR = mp.RES_DIR
-    REGION = mp.REGION
-    EXP_NAME = mp.EXP_NAME
-
-    # Paths
-    EXPERIMENT_PATH = RES_DIR / REGION / EXP_NAME
-    COMPRESSED_CPT_FOLDER = EXPERIMENT_PATH / "2_compressed_cpt"
-    COORDS_FOLDER = EXPERIMENT_PATH / "1_coords"
-    VALIDATION_FOLDER = EXPERIMENT_PATH / "8_validation"
-    SCHGAN_MODEL_PATH = mp.SCHGAN_MODEL_PATH
-
-    # Model parameters (from main_processing.py)
-    N_COLS = mp.N_COLS
-    N_ROWS = mp.N_ROWS
-
-    # Sectioning parameters (from main_processing.py)
-    CPTS_PER_SECTION = mp.CPTS_PER_SECTION
-    OVERLAP_CPTS = mp.OVERLAP_CPTS
-    LEFT_PAD_FRAC = mp.LEFT_PAD_FRACTION
-    RIGHT_PAD_FRAC = mp.RIGHT_PAD_FRACTION
-    DIR_FROM = mp.DIR_FROM
-    DIR_TO = mp.DIR_TO
-    VERTICAL_OVERLAP = mp.VERTICAL_OVERLAP
-    COMPRESSION_METHOD = mp.COMPRESSION_METHOD
-    CPT_DEPTH_PIXELS = mp.CPT_DEPTH_PIXELS
-
-    # Validation-specific parameters
-    N_RUNS = 10  # Number of validation runs
-    N_REMOVE = 12  # Number of CPTs to remove per run
-    BASE_SEED = 20231201  # Random seed for reproducibility (None for random)
-
-    # Construct CSV filename
-    COMPRESSED_CSV_NAME = (
-        f"compressed_cpt_data_{COMPRESSION_METHOD}_{CPT_DEPTH_PIXELS}px.csv"
-    )
-
-    # =============================================================================
-
-    print("=" * 80)
-    print("VOW SchemaGAN Validation - Leave-Out Cross-Validation")
-    print("=" * 80)
-
-    # Create validation output folder
-    VALIDATION_FOLDER.mkdir(parents=True, exist_ok=True)
-    print(f"\n✓ Validation folder: {VALIDATION_FOLDER}")
-
-    # Load SchemaGAN model
-    print(f"\n⏳ Loading SchemaGAN model from: {SCHGAN_MODEL_PATH}")
-    model = load_model(SCHGAN_MODEL_PATH, compile=False)
-    print("✓ Model loaded successfully")
-
-    # Path to compressed CPT data and coordinates
-    compressed_csv = COMPRESSED_CPT_FOLDER / COMPRESSED_CSV_NAME
-    coords_csv = (
-        COORDS_FOLDER / "cpt_coordinates.csv"
-    )  # Actual filename from extract_coords.py
-    depth_range_file = EXPERIMENT_PATH / "depth_range.json"
-
-    if not compressed_csv.exists():
-        raise FileNotFoundError(f"Compressed CPT data not found: {compressed_csv}")
-    if not coords_csv.exists():
-        raise FileNotFoundError(f"CPT coordinates not found: {coords_csv}")
-    if not depth_range_file.exists():
-        raise FileNotFoundError(
-            f"Depth range file not found: {depth_range_file}\n"
-            f"Please run the main processing pipeline first to generate this file."
-        )
-
-    print(f"✓ Found compressed CPT data: {compressed_csv.name}")
-    print(f"✓ Found CPT coordinates: {coords_csv.name}")
-
-    # Load depth range values
+    Args:
+        folders: Dictionary of folder paths from main pipeline
+        compressed_csv: Path to compressed CPT data CSV
+        y_top_m: Top depth in meters
+        y_bottom_m: Bottom depth in meters
+        n_runs: Number of validation runs
+        n_remove: Number of CPTs to remove per run
+        base_seed: Random seed for reproducibility
+    """
     import json
 
-    with open(depth_range_file, "r") as f:
-        depth_range = json.load(f)
-    y_top_m = depth_range["y_top_m"]
-    y_bottom_m = depth_range["y_bottom_m"]
-    print(f"✓ Loaded depth range: {y_top_m:.3f} to {y_bottom_m:.3f} m")
+    logger.info(
+        f"Starting validation with {n_runs} runs, removing {n_remove} CPTs per run"
+    )
 
-    # Load CPT names for reference
+    VALIDATION_FOLDER = folders["8_validation"]
+    VALIDATION_FOLDER.mkdir(parents=True, exist_ok=True)
+
+    # Load SchemaGAN model
+    logger.info(f"Loading SchemaGAN model from: {config.SCHGAN_MODEL_PATH}")
+    model = load_model(config.SCHGAN_MODEL_PATH, compile=False)
+    logger.info("Model loaded successfully")
+
+    # Path to coordinates
+    coords_csv = folders["1_coords"] / "cpt_coordinates.csv"
+    if not compressed_csv.exists():
+        raise FileNotFoundError(
+            f"Compressed CPT data not found: {compressed_csv}\n"
+            f"Please run Step 2 (RUN_STEP_2_PREPARE_CPTS = True) to generate this file first."
+        )
+    if not coords_csv.exists():
+        raise FileNotFoundError(
+            f"CPT coordinates not found: {coords_csv}\n"
+            f"Please run Step 1 (RUN_STEP_1_EXTRACT_COORDS = True) to generate this file first."
+        )
+
+    # Load CPT names
     df_temp = pd.read_csv(compressed_csv)
     cpt_names = df_temp.columns[1:].tolist()
     n_cpts = len(cpt_names)
     cpt_depth_pixels = len(df_temp)
 
-    print(f"✓ Total CPTs available: {n_cpts}")
-    print(f"✓ CPT depth resolution: {cpt_depth_pixels} pixels")
-    print(f"✓ Model expects: {N_ROWS} rows × {N_COLS} columns")
+    logger.info(f"Total CPTs available: {n_cpts}")
+    logger.info(f"CPT depth resolution: {cpt_depth_pixels} pixels")
 
-    if cpt_depth_pixels > N_ROWS:
+    if cpt_depth_pixels > config.N_ROWS:
         n_windows = int(
             np.ceil(
-                (cpt_depth_pixels - N_ROWS) / (N_ROWS * (1 - VERTICAL_OVERLAP / 100))
-                + 1
+                (cpt_depth_pixels - config.N_ROWS)
+                / (config.N_ROWS * (1 - config.VERTICAL_OVERLAP / 100))
             )
+            + 1
         )
-        print(f"✓ Will create ~{n_windows} depth windows per run")
+    else:
+        n_windows = 1
 
-    # Storage for results
+    logger.info(f"Number of depth windows: {n_windows}")
+
+    # Run validation iterations
     all_mae_results = []
     all_mse_results = []
 
-    # Run validation iterations
-    print(f"\n{'='*80}")
-    print(f"Running {N_RUNS} validation iterations (removing {N_REMOVE} CPTs each)")
-    print(f"{'='*80}\n")
+    for run_idx in range(1, n_runs + 1):
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Validation Run {run_idx}/{n_runs}")
+        logger.info(f"{'='*60}")
 
-    for run_idx in range(1, N_RUNS + 1):
-        print(f"[Run {run_idx}/{N_RUNS}]")
-        seed = BASE_SEED + run_idx if BASE_SEED is not None else None
+        # Set seed for this run
+        run_seed = base_seed + run_idx if base_seed is not None else None
 
-        # Create subfolder for this run's images
-        run_images_folder = VALIDATION_FOLDER / f"run_{run_idx:03d}"
-        run_images_folder.mkdir(parents=True, exist_ok=True)
+        # Create subfolder for this run
+        run_folder = VALIDATION_FOLDER / f"run_{run_idx:02d}"
+        run_folder.mkdir(parents=True, exist_ok=True)
 
-        # Run validation
+        # Run validation (this internally filters CPTs, creates sections, and generates predictions)
         mae_dict, mse_dict, removed_cpts = run_validation(
             compressed_csv=compressed_csv,
             coords_csv=coords_csv,
             model=model,
-            n_cols=N_COLS,
-            n_rows=N_ROWS,
-            cpts_per_section=CPTS_PER_SECTION,
-            overlap_cpts=OVERLAP_CPTS,
-            left_pad_frac=LEFT_PAD_FRAC,
-            right_pad_frac=RIGHT_PAD_FRAC,
-            dir_from=DIR_FROM,
-            dir_to=DIR_TO,
+            n_cols=config.N_COLS,
+            n_rows=config.N_ROWS,
+            cpts_per_section=config.CPTS_PER_SECTION,
+            overlap_cpts=config.OVERLAP_CPTS,
+            left_pad_frac=config.LEFT_PAD_FRACTION,
+            right_pad_frac=config.RIGHT_PAD_FRACTION,
+            dir_from=config.DIR_FROM,
+            dir_to=config.DIR_TO,
             y_top_m=y_top_m,
             y_bottom_m=y_bottom_m,
-            n_remove=N_REMOVE,
-            random_state=seed,
-            vertical_overlap_pct=VERTICAL_OVERLAP,
+            n_remove=n_remove,
+            random_state=run_seed,
+            vertical_overlap_pct=config.VERTICAL_OVERLAP,
             save_images=True,
-            images_folder=run_images_folder,
+            images_folder=run_folder,
         )
 
-        # Store results
+        logger.info(f"Removed CPTs ({len(removed_cpts)}): {', '.join(removed_cpts)}")
+
         all_mae_results.append(mae_dict)
         all_mse_results.append(mse_dict)
 
-        # Print summary statistics
+        # Display results
         mean_mae = np.mean(list(mae_dict.values()))
         mean_mse = np.mean(list(mse_dict.values()))
-        print(f"  Mean MAE: {mean_mae:.4f}")
-        print(f"  Mean MSE: {mean_mse:.4f}")
-        print()
+        logger.info(f"Run {run_idx} - Mean MAE: {mean_mae:.4f}")
+        logger.info(f"Run {run_idx} - Mean MSE: {mean_mse:.4f}")
 
     # Save aggregated results
-    print(f"{'='*80}")
-    print("Saving aggregated results...")
-    print(f"{'='*80}")
+    logger.info(f"\n{'='*60}")
+    logger.info("Saving aggregated results...")
+    logger.info(f"{'='*60}")
     save_validation_results(all_mae_results, all_mse_results, VALIDATION_FOLDER)
 
     # Compute and display overall statistics
     all_mae_means = [np.mean(list(d.values())) for d in all_mae_results]
     all_mse_means = [np.mean(list(d.values())) for d in all_mse_results]
 
-    print(f"\n{'='*80}")
-    print("VALIDATION SUMMARY")
-    print(f"{'='*80}")
-    print(f"Total runs: {N_RUNS}")
-    print(f"CPTs removed per run: {N_REMOVE}")
-    print(f"\nOverall MAE: {np.mean(all_mae_means):.4f} ± {np.std(all_mae_means):.4f}")
-    print(f"Overall MSE: {np.mean(all_mse_means):.4f} ± {np.std(all_mse_means):.4f}")
-    print(f"\nMAE range: [{np.min(all_mae_means):.4f}, {np.max(all_mae_means):.4f}]")
-    print(f"MSE range: [{np.min(all_mse_means):.4f}, {np.max(all_mse_means):.4f}]")
-    print(f"{'='*80}")
-    print(f"\n✓ Validation complete! Results saved to: {VALIDATION_FOLDER}")
+    logger.info(f"\n{'='*60}")
+    logger.info("VALIDATION SUMMARY")
+    logger.info(f"{'='*60}")
+    logger.info(f"Total runs: {n_runs}")
+    logger.info(f"CPTs removed per run: {n_remove}")
+    logger.info(
+        f"\nOverall MAE: {np.mean(all_mae_means):.4f} ± {np.std(all_mae_means):.4f}"
+    )
+    logger.info(
+        f"Overall MSE: {np.mean(all_mse_means):.4f} ± {np.std(all_mse_means):.4f}"
+    )
+    logger.info(
+        f"\nMAE range: [{np.min(all_mae_means):.4f}, {np.max(all_mae_means):.4f}]"
+    )
+    logger.info(
+        f"MSE range: [{np.min(all_mse_means):.4f}, {np.max(all_mse_means):.4f}]"
+    )
+    logger.info(f"{'='*60}")
+    logger.info(f"\nValidation complete! Results saved to: {VALIDATION_FOLDER}")
