@@ -2,14 +2,14 @@
 Main script for the VOW SchemaGAN pipeline.
 
 This script orchestrates the complete workflow by calling individual script functions:
-1. Setup experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic, 7_uncertainty)
+1. Setup experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic, 7_model_uncert)
 2. Extract coordinates from CPT files (calls extract_coords.py)
 3. Extract and compress CPT data (calls extract_data.py)
 4. Create sections for SchemaGAN input (calls create_schGAN_input_file.py)
 5. Generate schemas using trained SchemaGAN model (calls create_schema.py → 4_gan_images)
 6. Enhance schemas with boundary sharpening (calls boundary_enhancement.py → 5_enhance)
 7. Create mosaics from generated schemas (calls create_mosaic.py → 6_mosaic, creates both original and enhanced)
-8. Compute prediction uncertainty using MC Dropout (calls uncertainty_quantification.py → 7_uncertainty)
+8. Compute prediction uncertainty using MC Dropout (calls uncertainty_quantification.py → 7_model_uncert)
 
 Configure the paths and parameters in the CONFIG section below.
 """
@@ -1228,14 +1228,14 @@ def main():
     """Execute the complete VOW SchemaGAN pipeline.
 
     Orchestrates all eight steps of the workflow:
-    1. Creates experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic, 7_uncertainty)
+    1. Creates experiment folder structure (1_coords, 2_compressed_cpt, 3_sections, 4_gan_images, 5_enhance, 6_mosaic, 7_model_uncert)
     2. Extracts and validates CPT coordinates from GEF files
     3. Processes CPT data and compresses to specified depth resolution
     4. Creates spatial sections with overlapping CPTs
     5. Generates schemas using SchemaGAN model (saved to 4_gan_images)
     6. Enhances schemas with boundary sharpening (if enabled, saved to 5_enhance)
     7. Assembles sections into mosaics (creates both original and enhanced mosaics)
-    8. Computes prediction uncertainty using MC Dropout (if enabled, saved to 7_uncertainty)
+    8. Computes prediction uncertainty using MC Dropout (if enabled, saved to 7_model_uncert)
 
     All configuration is taken from module-level CONFIG constants.
     Results are saved in: {RES_DIR}/{REGION}/{EXP_NAME}/
@@ -1411,7 +1411,7 @@ def main():
                 SCHGAN_MODEL_PATH,
                 y_top_final,
                 y_bottom_final,
-                uncertainty_folder=folders["7_uncertainty"],
+                uncertainty_folder=folders["7_model_uncert"],
                 compute_uncertainty=COMPUTE_UNCERTAINTY,
                 n_mc_samples=N_MC_SAMPLES,
             )
@@ -1517,7 +1517,7 @@ def main():
         try:
             # Collect all uncertainty CSV files
             uncertainty_files = sorted(
-                folders["7_uncertainty"].glob("*_uncertainty.csv")
+                folders["7_model_uncert"].glob("*_uncertainty.csv")
             )
 
             if len(uncertainty_files) == 0:
@@ -1528,8 +1528,8 @@ def main():
                 # Create mosaic from uncertainty maps using same function as GAN/enhanced
                 run_mosaic_creation(
                     folders["3_sections"],
-                    folders["7_uncertainty"],
-                    folders["7_uncertainty"],
+                    folders["7_model_uncert"],
+                    folders["7_model_uncert"],
                     y_top_final,
                     y_bottom_final,
                     mosaic_prefix="uncertainty",
@@ -1543,8 +1543,8 @@ def main():
                 logger.info("[DEBUG] Creating mean prediction mosaic...")
                 run_mosaic_creation(
                     folders["3_sections"],
-                    folders["7_uncertainty"],
-                    folders["7_uncertainty"],
+                    folders["7_model_uncert"],
+                    folders["7_model_uncert"],
                     y_top_final,
                     y_bottom_final,
                     mosaic_prefix="mean",
@@ -1563,9 +1563,9 @@ def main():
                     import numpy as np
 
                     # Load both mosaics
-                    mean_mosaic_csv = folders["7_uncertainty"] / "mean_mosaic.csv"
+                    mean_mosaic_csv = folders["7_model_uncert"] / "mean_mosaic.csv"
                     uncertainty_mosaic_csv = (
-                        folders["7_uncertainty"] / "uncertainty_mosaic.csv"
+                        folders["7_model_uncert"] / "uncertainty_mosaic.csv"
                     )
 
                     mean_mosaic = pd.read_csv(mean_mosaic_csv, header=None).values
@@ -1626,7 +1626,7 @@ def main():
 
                     plt.tight_layout()
                     combined_png = (
-                        folders["7_uncertainty"]
+                        folders["7_model_uncert"]
                         / "combined_mean_uncertainty_mosaic.png"
                     )
                     plt.savefig(combined_png, dpi=150, bbox_inches="tight")

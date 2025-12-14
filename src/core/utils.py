@@ -242,7 +242,7 @@ def setup_experiment(
         "4_gan_images",
         "5_enhance",
         "6_mosaic",
-        "7_uncertainty",
+        "7_model_uncert",
     ]
 
     # Create subfolders

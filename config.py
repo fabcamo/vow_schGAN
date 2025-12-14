@@ -9,6 +9,20 @@ from pathlib import Path
 from typing import Optional
 
 # =============================================================================
+# PIPELINE STEPS CONTROL
+# =============================================================================
+# Enable or disable each step of the pipeline
+# Set to False to skip steps that have already been completed
+
+RUN_STEP_1_GET_COORDS = True  # Extract coordinates from CPT files
+RUN_STEP_2_PREPARE_CPTS = True  # Process and compress CPT data
+RUN_STEP_3_CREATE_SECTIONS = True  # Create sections for GAN input
+RUN_STEP_4_CREATE_GAN_IMAGES = True  # Generate schemas with GAN
+RUN_STEP_5_ENHANCE = True  # Boundary enhancement (if method selected)
+RUN_STEP_6_CREATE_MOSAIC = True  # Create mosaic from schemas
+RUN_STEP_7_MODEL_UNCERTAINTY = True  # Compute uncertainty (if enabled)
+
+# =============================================================================
 # PATHS CONFIGURATION
 # =============================================================================
 
