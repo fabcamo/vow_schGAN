@@ -677,60 +677,70 @@ def create_validation_mosaic(
             config.IC_MAX,
         )
 
-        # Plot mosaic with CPT markers
-        # Create custom plot to add both present and removed CPT markers
-        # Use dynamic figure size based on aspect ratio
-        horiz_m = xmax - xmin
-        vert_m = abs(y_bottom_m - y_top_m)
-        base_width = 16
-        height = np.clip(base_width * (vert_m / max(horiz_m, 1e-12)), 2, 12)
+        # Plot mosaic using the same plot_mosaic function as the original mosaic
+        # This ensures consistent axis labels and styling
+        from core.create_mosaic import plot_mosaic
 
-        fig, ax = plt.subplots(figsize=(base_width, height))
-        ax.imshow(
+        # Use plot_mosaic to create base visualization with proper axes
+        plot_mosaic(
             mosaic,
-            cmap=cmap,
+            xmin,
+            xmax,
+            global_dx,
+            n_rows_total,
+            mosaic_png,
+            coords=coords,
+            show_cpt_locations=True,
             vmin=vmin_val,
             vmax=vmax_val,
-            aspect="auto",
-            extent=[
-                xmin - global_dx / 2,
-                xmax + global_dx / 2,
-                n_rows_total - 0.5,
-                -0.5,
-            ],
+            cmap=cmap,
+            colorbar_label="IC Value",
+            ic_boundaries=ic_boundaries,
         )
-        cbar = ax.figure.colorbar(
-            ax.images[0],
-            ax=ax,
-            label="IC Value",
-            extend="both",
-            shrink=0.8,
-        )
-        cbar.set_ticks(list(ic_boundaries))
-        cbar.set_ticklabels([f"{val:g}" for val in ic_boundaries])
 
-        ax.set_xlabel("Distance along line (m)", fontsize=config.PLOT_FONT_SIZE)
-        ax.set_ylabel("Depth Index (global)", fontsize=config.PLOT_FONT_SIZE)
-        ax.set_title(
-            f"Validation Mosaic (with {len(removed_cpts or [])} CPTs removed)",
-            fontsize=config.PLOT_FONT_SIZE,
-        )
-        ax.tick_params(axis="both", labelsize=config.PLOT_FONT_SIZE)
-
-        # Add vertical lines at present CPT positions (solid black)
-        for cpt_x in coords["cum_along_m"]:
-            if xmin <= cpt_x <= xmax:
-                ax.axvline(
-                    x=cpt_x,
-                    color="black",
-                    linewidth=1,
-                    linestyle="-",
-                    alpha=0.5,
-                    zorder=10,
-                )
-
-        # Add vertical lines at removed CPT positions (dashed black)
+        # Now add removed CPT markers by reopening the saved figure
         if removed_cpts and coords_csv_full.exists():
+            from matplotlib.image import imread
+
+            img = imread(mosaic_png)
+
+            # Create figure with same settings as plot_mosaic
+            base_width = 20
+            height = base_width / 8
+            fig, ax = plt.subplots(figsize=(base_width, height))
+
+            # Display the mosaic with proper extent
+            ax.imshow(
+                mosaic,
+                cmap=cmap,
+                vmin=vmin_val,
+                vmax=vmax_val,
+                aspect="auto",
+                extent=[
+                    xmin - global_dx / 2,
+                    xmax + global_dx / 2,
+                    n_rows_total - 0.5,
+                    -0.5,
+                ],
+            )
+
+            # Add colorbar
+            cbar = plt.colorbar(ax.images[0], label="IC Value", extend="both")
+            cbar.ax.tick_params(labelsize=config.PLOT_FONT_SIZE)
+            cbar.set_label("IC Value", fontsize=config.PLOT_FONT_SIZE)
+            cbar.set_ticks(list(ic_boundaries))
+            cbar.set_ticklabels(
+                [f"{val:g}" for val in ic_boundaries], fontsize=config.PLOT_FONT_SIZE
+            )
+
+            # Add present CPT markers (solid)
+            for cpt_x in coords["cum_along_m"]:
+                if xmin <= cpt_x <= xmax:
+                    ax.axvline(
+                        x=cpt_x, color="black", linewidth=1, alpha=0.5, zorder=10
+                    )
+
+            # Add removed CPT markers (dashed)
             coords_full = pd.read_csv(coords_csv_full)
             coords_full_indexed = (
                 coords_full.set_index("name")
@@ -750,9 +760,44 @@ def create_validation_mosaic(
                             zorder=11,
                         )
 
-        plt.tight_layout()
-        plt.savefig(mosaic_png, dpi=300, bbox_inches="tight")
-        plt.close()
+            # Set labels and axes (matching plot_mosaic)
+            ax.set_xlabel("Distance along line (m)", fontsize=config.PLOT_FONT_SIZE)
+            ax.set_ylabel("Depth Index (global)", fontsize=config.PLOT_FONT_SIZE)
+            ax.tick_params(axis="both", labelsize=config.PLOT_FONT_SIZE)
+
+            # Add secondary axes (matching plot_mosaic)
+            def m_to_px(x):
+                return (x - xmin) / global_dx
+
+            def px_to_m(p):
+                return xmin + p * global_dx
+
+            top = ax.secondary_xaxis("top", functions=(m_to_px, px_to_m))
+            top.set_xlabel("Pixel index (0…W-1)", fontsize=config.PLOT_FONT_SIZE)
+            top.tick_params(labelsize=config.PLOT_FONT_SIZE)
+
+            def idx_to_m(y_idx):
+                return y_top_m + (y_idx / (n_rows_total - 1)) * (y_bottom_m - y_top_m)
+
+            def m_to_idx(y_m):
+                denom = y_bottom_m - y_top_m
+                return (
+                    0
+                    if abs(denom) < 1e-12
+                    else (y_m - y_top_m) * (n_rows_total - 1) / denom
+                )
+
+            right = ax.secondary_yaxis("right", functions=(idx_to_m, m_to_idx))
+            right.set_ylabel("Depth (m)", fontsize=config.PLOT_FONT_SIZE)
+            right.tick_params(labelsize=config.PLOT_FONT_SIZE)
+
+            plt.title(
+                f"Validation Mosaic (with {len(removed_cpts)} CPTs removed)",
+                fontsize=config.PLOT_FONT_SIZE,
+            )
+            plt.tight_layout()
+            plt.savefig(mosaic_png, dpi=800, bbox_inches="tight")
+            plt.close()
 
         # Create interactive HTML viewer with proper axes
         try:
