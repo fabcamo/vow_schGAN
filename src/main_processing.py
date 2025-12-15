@@ -428,6 +428,32 @@ def main():
         logger.info("Step 8: Skipped (RUN_STEP_8_VALIDATION = False)")
 
     # =============================================================================
+    # 9. RUN VALIDATION (ALIGNED MOSAIC, NEW)
+    # =============================================================================
+    if config.RUN_STEP_8_VALIDATION:
+        logger.info("=" * 60)
+        logger.info(
+            "Step 8: Running validation with leave-out cross-validation (aligned mosaic)..."
+        )
+        try:
+            from modules.validation_aligned import run_validation_pipeline_aligned
+
+            run_validation_pipeline_aligned(
+                folders=folders,
+                compressed_csv=compressed_csv,
+                y_top_m=y_top_final,
+                y_bottom_m=y_bottom_final,
+                n_runs=config.VALIDATION_N_RUNS,
+                n_remove=config.VALIDATION_N_REMOVE,
+                base_seed=config.VALIDATION_BASE_SEED,
+            )
+        except Exception as e:
+            logger.error(f"Failed to run aligned validation: {e}")
+    else:
+        logger.info("=" * 60)
+        logger.info("Step 8: Skipped (RUN_STEP_8_VALIDATION = False)")
+
+    # =============================================================================
     # 9. STRUCTURAL UNCERTAINTY (OPTIONAL)
     # =============================================================================
     if config.RUN_STEP_9_STRUCT_UNCERT:
