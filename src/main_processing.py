@@ -240,7 +240,7 @@ def main():
                     config.N_COLS,
                     ic_boundaries,
                     show_cpt_locations=config.SHOW_CPT_LOCATIONS,
-                    #create_colormap_func=create_custom_ic_colormap,
+                    create_colormap_func=create_custom_ic_colormap,
                     trace_func=trace_wrapper,
                     uncertainty_folder=folders["7_model_uncert"],
                     compute_uncertainty=config.COMPUTE_UNCERTAINTY,
@@ -313,8 +313,7 @@ def main():
             config.N_COLS,
             config.N_ROWS,
             config.SHOW_CPT_LOCATIONS,
-            None,
-            #create_custom_ic_colormap,
+            create_custom_ic_colormap,
             ic_boundaries,
             mosaic_prefix="original",
         )

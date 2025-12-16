@@ -6,14 +6,14 @@ import matplotlib.pyplot as plt
 # -----------------------------
 # INPUTS (edit these)
 # -----------------------------
-sigma_csv = Path(r"C:\VOW\res\north\exp_20\9_leaveout_uncert\leaveout_sigma_map.csv")
-coords_csv = Path(r"C:\VOW\res\north\exp_20\3_sections\cpt_coords_with_distances.csv")
+sigma_csv = Path(r"C:\VOW\res\south\exp_23\9_leaveout_uncert\leaveout_sigma_map.csv")
+coords_csv = Path(r"C:\VOW\res\south\exp_23\3_sections\cpt_coords_with_distances.csv")
 manifest_csv = Path(
-    r"C:\VOW\res\north\exp_20\3_sections\manifest_sections.csv"
+    r"C:\VOW\res\south\exp_23\3_sections\manifest_sections.csv"
 )
 
 out_png = Path(
-    r"C:\VOW\res\north\exp_20\9_leaveout_uncert\leaveout_sigma_map_FIXED.png"
+    r"C:\VOW\res\south\exp_23\9_leaveout_uncert\leaveout_sigma_map_FIXED.svg"
 )
 
 y_top_m = 0.0  # <-- set to your values
@@ -76,7 +76,7 @@ for x in coords["cum_along_m"].values:
 
 plt.xlabel("Distance along line (m)")
 plt.ylabel("Depth index (global)")
-plt.title("East leave-out uncertainty (Std Dev)")
+plt.title("West leave-out uncertainty (Std Dev)")
 
 # Right y-axis in meters (optional)
 ax = plt.gca()

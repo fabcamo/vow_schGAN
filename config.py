@@ -14,15 +14,15 @@ from typing import Optional
 # Enable or disable each step of the pipeline
 # Set to False to skip steps that have already been completed
 
-RUN_STEP_1_GET_COORDS = True  # Extract coordinates from CPT files
-RUN_STEP_2_PREPARE_CPTS = True  # Process and compress CPT data
-RUN_STEP_3_CREATE_SECTIONS = True  # Create sections for GAN input
-RUN_STEP_4_CREATE_GAN_IMAGES = True  # Generate schemas with GAN
-RUN_STEP_5_ENHANCE = True  # Boundary enhancement (if method selected)
+RUN_STEP_1_GET_COORDS = False  # Extract coordinates from CPT files
+RUN_STEP_2_PREPARE_CPTS = False  # Process and compress CPT data
+RUN_STEP_3_CREATE_SECTIONS = False  # Create sections for GAN input
+RUN_STEP_4_CREATE_GAN_IMAGES = False  # Generate schemas with GAN
+RUN_STEP_5_ENHANCE = False  # Boundary enhancement (if method selected)
 RUN_STEP_6_CREATE_MOSAIC = True  # Create mosaic from schemas
-RUN_STEP_7_MODEL_UNCERTAINTY = True  # Compute uncertainty (if enabled)
-RUN_STEP_8_VALIDATION = True  # Run validation with leave-out cross-validation
-RUN_STEP_9_LEAVEOUT_UNCERT = True  # Compute structural uncertainty
+RUN_STEP_7_MODEL_UNCERTAINTY = False  # Compute uncertainty (if enabled)
+RUN_STEP_8_VALIDATION = False  # Run validation with leave-out cross-validation
+RUN_STEP_9_LEAVEOUT_UNCERT = False  # Compute structural uncertainty
 
 # =============================================================================
 # PATHS CONFIGURATION
@@ -37,7 +37,7 @@ RES_DIR = Path(BASE_PATH / "res")  # Base results directory
 
 # Input data paths
 CPT_FOLDER = Path(
-    BASE_PATH / "data" / "cpts" / "betuwepand" / "dike_south_BRO"
+    BASE_PATH / "data" / "cpts" / "betuwepand" / "dike_north_BRO"
 )  # Folder with .gef CPT files
 
 SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")  # Trained SchemaGAN model
@@ -46,7 +46,7 @@ SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")  # Trained SchemaGAN m
 # EXPERIMENT CONFIGURATION
 # =============================================================================
 
-REGION = "south"  # Region name for experiment folder and the data subfolder
+REGION = "north"  # Region name for experiment folder and the data subfolder
 EXP_NAME = "exp_23"
 DESCRIPTION = (
     "interactive html plots,"
