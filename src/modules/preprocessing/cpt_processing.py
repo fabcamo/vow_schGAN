@@ -68,7 +68,8 @@ def run_cpt_data_processing(
     logger.info(f"Depth range: {lowest_max_depth:.3f} to {lowest_min_depth:.3f} m")
 
     # Process data
-    equalized_top_cpts = fill_top_with_zeros(original_data_cpts)
+    #equalized_top_cpts = fill_top_with_zeros(original_data_cpts)
+    equalized_top_cpts = equalize_top(original_data_cpts)
     equalized_depth_cpts = equalize_depth(equalized_top_cpts, lowest_min_depth)
     compressed_cpts = compress_cpt_data(
         equalized_depth_cpts, method=compression_method, n_pixels=cpt_depth_pixels

@@ -20,9 +20,9 @@ RUN_STEP_3_CREATE_SECTIONS = True  # Create sections for GAN input
 RUN_STEP_4_CREATE_GAN_IMAGES = True  # Generate schemas with GAN
 RUN_STEP_5_ENHANCE = True  # Boundary enhancement (if method selected)
 RUN_STEP_6_CREATE_MOSAIC = True  # Create mosaic from schemas
-RUN_STEP_7_MODEL_UNCERTAINTY = False  # Compute uncertainty (if enabled)
-RUN_STEP_8_VALIDATION = False  # Run validation with leave-out cross-validation
-RUN_STEP_9_LEAVEOUT_UNCERT = False  # Compute structural uncertainty
+RUN_STEP_7_MODEL_UNCERTAINTY = True  # Compute uncertainty (if enabled)
+RUN_STEP_8_VALIDATION = True  # Run validation with leave-out cross-validation
+RUN_STEP_9_LEAVEOUT_UNCERT = True  # Compute structural uncertainty
 
 # =============================================================================
 # PATHS CONFIGURATION
@@ -37,7 +37,7 @@ RES_DIR = Path(BASE_PATH / "res")  # Base results directory
 
 # Input data paths
 CPT_FOLDER = Path(
-    BASE_PATH / "data" / "cpts" / "betuwepand" / "dike_north_BRO"
+    BASE_PATH / "data" / "cpts" / "betuwepand" / "dike_south_BRO"
 )  # Folder with .gef CPT files
 
 SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")  # Trained SchemaGAN model
@@ -46,8 +46,8 @@ SCHGAN_MODEL_PATH = Path(r"D:\schemaGAN\h5\schemaGAN.h5")  # Trained SchemaGAN m
 # EXPERIMENT CONFIGURATION
 # =============================================================================
 
-REGION = "north"  # Region name for experiment folder and the data subfolder
-EXP_NAME = "exp_22"
+REGION = "south"  # Region name for experiment folder and the data subfolder
+EXP_NAME = "exp_23"
 DESCRIPTION = (
     "interactive html plots,"
     "CPT comparison from the validation step,"
@@ -57,8 +57,8 @@ DESCRIPTION = (
     "50% vertical overlap,"
     "10% padding,"
     "No boundary enhancement,"
-    "Model uncertainty with 5 MC samples,"
-    "Leave-out validation with 500 runs removing 12 CPTs each,"
+    "Model uncertainty with 100 MC samples,"
+    "Leave-out validation with 100 runs removing 12 CPTs each,"
 )
 
 
@@ -157,7 +157,7 @@ ENHANCE_METHOD = "none"  # Enhancement method to sharpen layer boundaries
 
 COMPUTE_UNCERTAINTY = True  # Compute prediction uncertainty using MC Dropout
 N_MC_SAMPLES = (
-    5  # Number of MC Dropout samples (20-100 typical, more = slower but more accurate)
+    100  # Number of MC Dropout samples (20-100 typical, more = slower but more accurate)
 )
 # MC Dropout reveals where the GAN is uncertain in its predictions:
 #   - High uncertainty: complex transitions, far from data, ambiguous interpolations
@@ -168,7 +168,7 @@ N_MC_SAMPLES = (
 # VALIDATION PARAMETERS
 # =============================================================================
 
-VALIDATION_N_RUNS = 600  # Number of validation runs (leave-out cross-validation)
+VALIDATION_N_RUNS = 100  # Number of validation runs (leave-out cross-validation)
 VALIDATION_N_REMOVE = 12  # Number of CPTs to remove per run
 VALIDATION_BASE_SEED = 20231201  # Random seed for reproducibility (None for random)
 
